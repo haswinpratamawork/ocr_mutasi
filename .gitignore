@@ -1,0 +1,110 @@
+# =============================================================================
+#  Secrets — never commit
+# =============================================================================
+# `.env` carries the Azure OpenAI key. `.env.example` is the safe template
+# and IS committed (no leading dot-rule on the example itself).
+.env
+.env.local
+.env.*.local
+*.local
+secrets/
+*.key
+*.pem
+*.p12
+*.crt
+
+# =============================================================================
+#  Bank-statement PDFs — PII, never commit
+# =============================================================================
+# Every PDF in this project is a real bank statement with real account
+# numbers, names, addresses, and transactions. Block ALL .pdf files by
+# default so accidental adds are impossible. Override per-file if you ever
+# create a SYNTHETIC sample that's safe to publish, e.g.:
+#     !samples/synthetic_example.pdf
+*.pdf
+
+# The 12-month BRI sample folder — ignored independently so accidental
+# `git add mutasi_haswin/` (without a wildcard) still does nothing.
+mutasi_haswin/
+
+# Generated / scratch outputs
+out/
+tmp/
+*.log
+*.json.bak
+
+# =============================================================================
+#  Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+build/
+dist/
+.eggs/
+pip-wheel-metadata/
+share/python-wheels/
+MANIFEST
+
+# Test / lint / type-check caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+.tox/
+.nox/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+*.py,cover
+nosetests.xml
+
+# Jupyter (if anyone opens a notebook for ad-hoc inspection)
+.ipynb_checkpoints/
+
+# =============================================================================
+#  Virtualenvs
+# =============================================================================
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# =============================================================================
+#  IDE / editor / agent tooling
+# =============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+*.sublime-project
+
+# Claude Code & related tooling — these hold per-developer workspace state
+# (settings.local.json, skill installs) and shouldn't be shared.
+.claude/
+.agents/
+.qodo/
+skills-lock.json
+
+# =============================================================================
+#  Operating system
+# =============================================================================
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
