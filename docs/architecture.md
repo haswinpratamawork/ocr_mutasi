@@ -35,7 +35,7 @@ This document explains **why** the system is built the way it is. For *how* to u
 
 ## 1. Overview
 
-OCR Mutasi is a backend service that ingests Indonesian bank-statement ("mutasi") PDFs and produces structured JSON, with credit transactions semantically classified as **Gaji** (fixed monthly salary), **THR** (religious-holiday allowance), **Bonus** (annual), **Insentif** (performance), or **Lainnya** (other).
+OCR Mutasi is a backend service that ingests Indonesian bank-statement ("mutasi") PDFs and produces structured JSON, with credit transactions semantically classified as **Gaji** (fixed monthly salary), **THR** (Tunjangan Hari Raya — religious-holiday allowance), **Bonus** (any `BONUS_*` label, annual or interim), **Insentif** (performance-tied pay **and** work-related `TUNJANGAN <kind>` allowances), or **Lainnya** (other).
 
 Despite the project name, **no image OCR is performed**. Indonesian bank statements from BCA and BRI ship as digital PDFs with a clean embedded text layer. Reading that layer with `pypdfium2` is faster, deterministic, and far more accurate than rasterizing and OCR-ing. The "OCR" in the name is historical; the system is best described as a *PDF text-layer extractor + geometric table reconstructor + LLM classifier*.
 
@@ -275,14 +275,26 @@ classify_credits_batch(credits_with_source: list[tuple[str, Transaction]])
 - Per-row output: `category`, `confidence` (0–1), `reason` (≤25 words).
 - **Failure mode:** any `APIError`, `APITimeoutError`, `JSONDecodeError`, or `KeyError` is caught; credits are returned with `category=None`, and `audit.classifier_errors` carries the error message. The request returns `200`. The frontend is expected to surface the error.
 
-**Single-PDF prompt (`SYSTEM_PROMPT`):**
-Defines the four categories with their typical Indonesian/English signals. Instructs the model to bias toward `Lainnya` when uncertain. Sees only one month's credits.
+**Prompt design — explicit label-first decision rules.**
+Both prompts (single-PDF `SYSTEM_PROMPT` and batch `BATCH_SYSTEM_PROMPT`) are written as a numbered list of rules applied **in order**, first match wins. This replaces the prior natural-language category descriptions that left the model free to interpret edge cases (e.g. `BONUS_INTERIM` once landed in Insentif because "interim" *sounds* performance-y). Each LLM-returned `reason` field cites the rule that fired, making every classification auditable.
 
-**Batch prompt (`BATCH_SYSTEM_PROMPT`):**
-Adds the critical sentence: *"The single strongest signal for Gaji: same amount on roughly the same day-of-month across multiple months, from the same source/system. Recurrence beats keywords."* Each credit in the payload includes its `source_file`, so the model can see e.g. that `SAP-DD TRANSACTION` appears in every monthly file. This is what enables Gaji detection for descriptions that look unremarkable in isolation.
+The rules:
+
+| # | Pattern in description | Category |
+|---|---|---|
+| 1 | `BONUS_…` / `BONUS ` | **Bonus** |
+| 2 | `THR` / `HARI RAYA` / `TUNJANGAN HARI RAYA` | **THR** |
+| 3 | `ECUTI` / `INSENTIF` / `INCENTIVE` / `KOMISI` / `COMMISSION` **or** any `TUNJANGAN <kind>` other than Hari Raya (`TUNJANGAN TRANSPORT`, `TUNJANGAN MAKAN`, `TUNJANGAN PULSA`, `TUNJANGAN KELUAR KOTA`, `TUNJANGAN KESEHATAN`, `TUNJANGAN ANAK`, `TUNJANGAN ISTRI`, …) | **Insentif** |
+| 4 | `GAJI` / `PAYROLL` / `SALARY` / `KR OTOMATIS` / `SAP-DD` / `TRSF GAJI` / `PAYROLL-DEPOSIT` / `SALARY-CRDT` | **Gaji** |
+| 5 | *(batch only)* no label match + same amount recurs on roughly the same day-of-month across multiple uploaded PDFs | **Gaji** |
+| 6 | otherwise | **Lainnya** |
+
+**Rule order matters.** Rule 2 (THR) is deliberately placed before rule 3 (Insentif's generic-tunjangan catchall). Without that ordering, `TUNJANGAN HARI RAYA` would match rule 3's "any `TUNJANGAN <kind>`" clause and be silently mis-categorised as Insentif instead of THR. Rules 4 and 6 only fire when none of the explicit-label rules above them did.
+
+**Batch vs single-PDF.** The two prompts share rules 1–4 and 6 verbatim. The batch prompt additionally exposes rule 5 (cross-month recurrence) and tells the model the `source_file` field is meaningful, so it can spot e.g. `SAP-DD TRANSACTION` repeating monthly even when no rule-4 keyword matches. This is what enables Gaji detection for opaque descriptions like the real-world BRI sample (validation §13.4: 0 → 12 Gaji rows detected).
 
 **Output schema (`_RESPONSE_SCHEMA`):**
-Strict JSON schema — `{classifications: [{id, category, confidence, reason}]}` — with `category` constrained to the four enum values. The `strict: True` flag asks Azure OpenAI to enforce the schema server-side.
+Strict JSON schema — `{classifications: [{id, category, confidence, reason}]}` — with `category` constrained to the five-value enum `Gaji | THR | Bonus | Insentif | Lainnya`. The `strict: True` flag asks Azure OpenAI to enforce the schema server-side; if the model would otherwise produce an out-of-enum value it's coerced or the request fails fast.
 
 ### 5.4 `pipeline.py` — orchestrator
 

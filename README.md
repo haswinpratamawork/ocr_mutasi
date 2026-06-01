@@ -1,6 +1,6 @@
 # OCR Mutasi
 
-> Backend service that extracts transactions from Indonesian bank-statement PDFs and uses an LLM to classify each *credit* transaction as **Gaji** (fixed monthly salary), **THR** (religious-holiday allowance), **Bonus** (annual), **Insentif** (performance), or **Lainnya** (other).
+> Backend service that extracts transactions from Indonesian bank-statement PDFs and uses an LLM to classify each *credit* transaction as **Gaji** (fixed monthly salary), **THR** (religious-holiday allowance), **Bonus** (any `BONUS_*` label, annual or interim), **Insentif** (performance pay and work-related `TUNJANGAN <kind>` allowances), or **Lainnya** (other).
 
 **Current version:** v0.6 — three supported banks, 5-category classifier (Gaji / THR / Bonus / Insentif / Lainnya), batch endpoint with cross-month classification, in-browser upload page, per-category `min` stat. See the change log in [architecture.md §19](docs/architecture.md#19-change-log).
 
@@ -59,6 +59,31 @@ PDF(s)  →  pypdfium2 text extraction  →  geometric table reconstruction (per
 |---|---|
 | `POST /api/v1/mutations/extract` | One PDF, one response. Good for ad-hoc inspection and debugging. |
 | `POST /api/v1/mutations/extract-batch` | **Recommended for any "year of statements" workflow.** Sees every credit from every uploaded PDF in a *single* LLM call, so it catches recurring monthly payroll deposits whose individual rows look unremarkable. Real-world impact: 0 → 12 correct Gaji detections on the included 12-month BRI sample. |
+
+### The 5 classification categories
+
+Every credit row is assigned one of these. Definitions match Indonesian corporate-payroll conventions:
+
+| Category | Definition | Common labels |
+|---|---|---|
+| **Gaji** | Fixed monthly salary that arrives on/near the same date with the same amount. | `GAJI`, `PAYROLL`, `SALARY`, `KR OTOMATIS GAJI`, `TRSF GAJI`, `SAP-DD` (SAP Direct Deposit), `PAYROLL-DEPOSIT` |
+| **THR** | Tunjangan Hari Raya — religious-holiday allowance (Idul Fitri / Lebaran / Christmas). Paid 1–2× a year. | `THR`, `THR_Islam`, `THR_Idulfitri`, `THR_Lebaran`, `HARI RAYA`, `TUNJANGAN HARI RAYA` |
+| **Bonus** | Any payment whose description starts with `BONUS_*`. Whether it's annual (`BONUS_POOL`, `BONUS_TAHUNAN`) or interim (`BONUS_INTERIM`), the `BONUS_` prefix is the company's own bonus-program label and all such rows are Bonus. | `BONUS_POOL`, `BONUS_TAHUNAN`, `BONUS_INTERIM`, `BONUS_YEARLY`, `ANNUAL_BONUS` |
+| **Insentif** | Performance-tied pay **and** work-related `TUNJANGAN <kind>` allowances paid alongside Gaji. Anything an employee earns for performance or as a job perk lives here. | `INSENTIF`, `INCENTIVE`, `KOMISI`, `COMMISSION`, `ECUTI` (extra-cuti payout), `TUNJANGAN TRANSPORT`, `TUNJANGAN MAKAN`, `TUNJANGAN PULSA`, `TUNJANGAN KELUAR KOTA`, `TUNJANGAN KESEHATAN`, `TUNJANGAN ANAK`, `TUNJANGAN ISTRI` — i.e. any `TUNJANGAN <kind>` *except* `TUNJANGAN HARI RAYA` |
+| **Lainnya** | Anything the rules above don't match: P2P transfers from a person's name, refunds, interest, sale proceeds, self-transfers, reimbursements. | `Transfer Dari <name>`, `BIF TRANSFER DR <name>`, `BUNGA TABUNGAN`, refund descriptors |
+
+### Decision rules (applied in order, first match wins)
+
+The LLM follows these six rules verbatim from the system prompt. Each row's `reason` field cites the rule that fired, so misclassifications are easy to diagnose.
+
+1. Description contains `BONUS_…` or `BONUS ` → **Bonus**
+2. Description contains `THR` / `HARI RAYA` / `TUNJANGAN HARI RAYA` → **THR** *(must run before rule 3 so the generic-tunjangan catchall doesn't swallow it)*
+3. Description contains `ECUTI` / `INSENTIF` / `INCENTIVE` / `KOMISI` / `COMMISSION` **or** any `TUNJANGAN <kind>` other than Hari Raya (transport, makan, pulsa, keluar kota, kesehatan, …) → **Insentif**
+4. Description contains `GAJI` / `PAYROLL` / `SALARY` / `KR OTOMATIS` / `SAP-DD` / `TRSF GAJI` / `PAYROLL-DEPOSIT` / `SALARY-CRDT` → **Gaji**
+5. *(Batch endpoint only)* No label match, but the same amount recurs on roughly the same day-of-month across multiple uploaded PDFs → **Gaji** (cross-month recurrence is the strongest unlabelled salary signal)
+6. Otherwise → **Lainnya**
+
+The full prompt text lives in `ocr_mutasi/llm_classifier.py` (`SYSTEM_PROMPT` for single-PDF, `BATCH_SYSTEM_PROMPT` for batch).
 
 ---
 
@@ -749,6 +774,8 @@ All settings are read from `.env` once at startup (singleton via `pydantic-setti
 | Non-empty `audit.parse_warnings` | 200 | A row matched a header heuristic but its amount didn't parse | Look at the warning; usually a data oddity in one row |
 | Non-empty `audit.classifier_errors` | 200 | Azure OpenAI was unreachable / returned bad JSON | Extraction data is still valid. Retry the request once Azure is healthy. |
 | All credits classified `Lainnya`, even payroll-looking ones | 200 | You hit `/extract` per month instead of `/extract-batch` | Switch to the batch endpoint — single-PDF can't see cross-month recurrence (see §1 and §5.2). |
+| A category looks wrong (e.g. `BONUS_INTERIM` classified as Insentif) | 200 | The LLM may be inferring instead of following rules — but every classified row's `reason` field cites which rule fired. Check the reason. | If the cited rule number doesn't match what §1 documents, the prompt drifted; see `SYSTEM_PROMPT` / `BATCH_SYSTEM_PROMPT` in `ocr_mutasi/llm_classifier.py`. |
+| A `TUNJANGAN` row ended up in `Lainnya` | 200 | Pre-v0.6 behaviour — generic tunjangan used to fall into Lainnya. v0.6 routes work-related `TUNJANGAN <kind>` to **Insentif** via rule 3. | Pull the latest build and restart uvicorn. |
 | Swagger UI shows "Add string item" for `files` instead of a file picker | n/a | Stale build — pull v0.5 (or restart uvicorn). v0.5 patches the OpenAPI schema to emit `format: "binary"`. | If still broken after restart, see FAQ §14. |
 | `GET /` returns 404 in the browser | n/a | Pre-v0.5 build; `/` now `307`s to `/upload`. | Restart uvicorn. |
 | Server log shows full `Traceback` on a malformed PDF | n/a | Should NOT happen — we re-raise as `InvalidPdfError` and log a one-line WARNING. If you see a traceback for a client-fault, that's a regression — please file. | — |
@@ -780,6 +807,15 @@ Read `ocr_mutasi/llm_classifier.py` — `SYSTEM_PROMPT` (single) and `BATCH_SYST
 
 **Q. Can I run this without Azure OpenAI?**
 Pass `?classify=false` on either endpoint. Extraction still runs; `credits` come back with `category: null`. Useful for debugging the parser without spending LLM budget.
+
+**Q. Why is `TUNJANGAN TRANSPORT` (or `MAKAN`, `PULSA`, `KELUAR KOTA`, …) classified as Insentif instead of Lainnya?**
+Because in Indonesian corporate-payroll convention, these are work-tied perks earned by an employee — closer to performance pay than to "generic other income". v0.6 routes any `TUNJANGAN <kind>` (except `TUNJANGAN HARI RAYA`, which goes to THR) to Insentif via rule 3 of the classifier prompt. See §1 for the full rule list, or the system-prompt source in `ocr_mutasi/llm_classifier.py`.
+
+**Q. Why is `BONUS_INTERIM` classified as Bonus, not Insentif (since "interim" sounds performance-y)?**
+The `BONUS_` prefix is the company's own bonus-program naming. Whether annual (`BONUS_POOL`) or mid-year (`BONUS_INTERIM`), every `BONUS_*` row goes to Bonus via rule 1. The distinction between annual and interim is internal to the bonus program, not a separate category.
+
+**Q. How do I know which rule fired for a given classification?**
+Every classified credit's `reason` field cites the rule (e.g. *"BONUS_INTERIM label → Bonus per rule 1"*, *"TUNJANGAN TRANSPORT → Insentif per rule 3"*). On the `/upload` page the reason shows in the rightmost column of each accordion table.
 
 **Q. Why does the API emit OpenAPI 3.0.3 instead of 3.1?**
 Because Swagger UI bundled with FastAPI doesn't fully implement OpenAPI 3.1's `contentMediaType` keyword for multi-file uploads — it falls back to rendering each file slot as an "Add string item" plain-text field. OpenAPI 3.0.3 uses the older `format: "binary"` keyword, which Swagger UI renders as a proper file picker. The downgrade is set on one line in `api.py`: `app.openapi_version = "3.0.3"`, plus a small `_custom_openapi` post-processor that rewrites any leftover `contentMediaType` keywords into `format: "binary"`.
