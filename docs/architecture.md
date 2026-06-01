@@ -1,6 +1,6 @@
 # OCR Mutasi — Architecture
 
-**Status:** v0.5 (current)
+**Status:** v0.6 (current)
 **Date:** 2026-06-01
 **Audience:** Engineers extending the parser set, the LLM prompts, or the HTTP surface.
 **Companion doc:** [`README.md`](../README.md) (install, run, API examples).
@@ -35,7 +35,7 @@ This document explains **why** the system is built the way it is. For *how* to u
 
 ## 1. Overview
 
-OCR Mutasi is a backend service that ingests Indonesian bank-statement ("mutasi") PDFs and produces structured JSON, with credit transactions semantically classified as **Gaji** (salary), **Tunjangan** (allowance), **Bonus**, or **Lainnya** (other).
+OCR Mutasi is a backend service that ingests Indonesian bank-statement ("mutasi") PDFs and produces structured JSON, with credit transactions semantically classified as **Gaji** (fixed monthly salary), **THR** (religious-holiday allowance), **Bonus** (annual), **Insentif** (performance), or **Lainnya** (other).
 
 Despite the project name, **no image OCR is performed**. Indonesian bank statements from BCA and BRI ship as digital PDFs with a clean embedded text layer. Reading that layer with `pypdfium2` is faster, deterministic, and far more accurate than rasterizing and OCR-ing. The "OCR" in the name is historical; the system is best described as a *PDF text-layer extractor + geometric table reconstructor + LLM classifier*.
 
@@ -333,7 +333,7 @@ Why it exists: Swagger UI's array editor renders `array of binary` as one file p
 
 - One native `<input type="file" multiple accept="application/pdf">` — the OS file picker handles multi-selection via Cmd/Ctrl-click or Shift-click.
 - Submits via `fetch` to `/api/v1/mutations/extract-batch` with the same field name (`files`) repeated per file in `FormData`.
-- After the response arrives, renders an accordion (one `<details>` per category) showing every transaction's date, source file, amount, description, LLM confidence, and reason. Gaji / Tunjangan / Bonus expand by default; Lainnya stays collapsed (usually noisy). Category names are colour-coded.
+- After the response arrives, renders an accordion (one `<details>` per category) showing every transaction's date, source file, amount, description, LLM confidence, and reason. Gaji / THR / Bonus / Insentif expand by default; Lainnya stays collapsed (usually noisy). Category names are colour-coded.
 - The full raw JSON response is also available behind a collapsible "Show raw JSON" toggle.
 - Long descriptions wrap; the table scrolls horizontally on narrow screens.
 - All user-visible text is HTML-escaped via a small `esc()` helper.
@@ -351,7 +351,7 @@ All types are Pydantic v2 models in `ocr_mutasi/models.py`. They're used both in
 | `TextChunk` | `text`, `x0`, `y0`, `x1`, `y1`, `page` | extractor → parser |
 | `AccountHeader` | `bank`, `no_rekening`, `nama`, `periode`, `mata_uang` | response top-level |
 | `Transaction` | `tanggal` (ISO), `keterangan`, `cbg`, `amount`, `type` (`DB`\|`CR`), `saldo?`, `page` | response `transactions[]` |
-| `ClassifiedCredit` | `Transaction` + `category` (`Gaji`\|`Tunjangan`\|`Bonus`\|`Lainnya`\|`null`), `confidence?`, `reason?` | single-PDF `credits[]` |
+| `ClassifiedCredit` | `Transaction` + `category` (`Gaji`\|`THR`\|`Bonus`\|`Insentif`\|`Lainnya`\|`null`), `confidence?`, `reason?` | single-PDF `credits[]` |
 | `Audit` | `pages_processed`, `rows_detected`, `credit_count`, `debit_count`, `balance_warnings[]`, `parse_warnings[]`, `classifier_errors[]` | response `audit` |
 | `ExtractionResponse` | `account`, `transactions[]`, `credits[]`, `audit` | `/extract` response |
 | `FileExtraction` | `filename`, `account`, `transactions[]`, `audit` | batch `files[]` element |
@@ -398,7 +398,7 @@ Per-parser internal types (`_BcaLayout`, `_BriLayout`, `Row`) live in the parser
       "type": "CR",
       "saldo": 11000000.00,
       "page": 4,
-      "category": "Lainnya",          // Gaji | Tunjangan | Bonus | Lainnya | null
+      "category": "Lainnya",          // Gaji | THR | Bonus | Insentif | Lainnya | null
       "confidence": 0.7,              // 0..1, or null if classification failed
       "reason": "No salary keywords; transfer from individual."
     }
@@ -449,10 +449,11 @@ Per-parser internal types (`_BcaLayout`, `_BriLayout`, `Row`) live in the parser
     "credits_total": 98,
     "classifier_errors": [],
     "category_totals": {
-      "Gaji":      { "count": 12, "sum": 120000000.00 },
-      "Tunjangan": { "count":  3, "sum":  45000000.00 },
-      "Bonus":     { "count":  2, "sum":  44000000.00 },
-      "Lainnya":   { "count": 81, "sum":  50000000.00 }
+      "Gaji":     { "count": 12, "sum": 120000000.00, "min": 9500000.00 },
+      "THR":      { "count":  1, "sum":  23000000.00, "min": 23000000.00 },
+      "Bonus":    { "count":  1, "sum":  37000000.00, "min": 37000000.00 },
+      "Insentif": { "count":  1, "sum":   7000000.00, "min":  7000000.00 },
+      "Lainnya":  { "count": 83, "sum":  72000000.00, "min":    10000.00 }
     }
   }
 }
@@ -697,12 +698,13 @@ Memory: peak ~80 MB for a 12-month batch (all PDFs fit comfortably).
 
 Year-level totals returned by `/extract-batch`:
 
-| Category | Count | Year sum (Rp) | What it caught |
-|---|---:|---:|---|
-| **Gaji** | 12 | 120,000,000 | All 12 monthly `SAP-DD TRANSACTION` payroll deposits — recognised purely from cross-month recurrence (no salary keyword in descriptions) |
-| **Tunjangan** | 3 | 45,000,000 | 1× `THR_Islam_2026`, 2× `ECUTI` leave allowances |
-| **Bonus** | 2 | 44,000,000 | `BONUS_INTERIM_2025`, `BONUS_POOL_2025_1` |
-| Lainnya | 81 | 50,000,000 | P2P transfers, refunds, etc. |
+| Category | Count | Year sum (Rp) | Min single tx (Rp) | What it caught |
+|---|---:|---:|---:|---|
+| **Gaji**     | 12 | 120,000,000 |  9,500,000 | All 12 monthly `SAP-DD TRANSACTION` payroll deposits — recognised purely from cross-month recurrence (no salary keyword in descriptions) |
+| **THR**      | 1  |  23,000,000 | 23,000,000 | 1× `THR_Islam_2026` (religious-holiday allowance) |
+| **Bonus**    | 1  |  37,000,000 | 37,000,000 | 1× `BONUS_POOL_2025_1` (annual / structured) |
+| **Insentif** | 1  |   7,000,000 |  7,000,000 | 1× `BONUS_INTERIM_2025` (performance-triggered, distinct from annual Bonus) |
+| Lainnya      | 83 |  72,000,000 |     10,000 | P2P transfers, refunds, ECUTI leave allowances, etc. |
 
 The same LLM call against per-month-isolated credits produced **zero** Gaji classifications. Cross-month context turned 0 → 12 with confidence 0.95 — the most concrete validation possible that the batch endpoint solves a real problem.
 
@@ -837,13 +839,14 @@ The pattern is: validate inputs → call into `pipeline` → translate exception
 | v0.2 | 2026-05-31 | Switched to `pypdfium2`; built BCA parser, single `/extract` endpoint, Azure OpenAI classification; verified against `contoh_mutasi.pdf`. |
 | v0.3 | 2026-05-31 | Added BRI BritAma parser, per-bank dispatch, parser subpackage; validated against 12 real BRI months. Surfaced cross-month classification gap. |
 | v0.4 | 2026-05-31 | Added `/extract-batch` endpoint, `classify_credits_batch`, cross-month-aware prompt, year-level `category_totals` rollup. Resolved cross-month gap (0 → 12 Gaji detections). Refactored error model: `InvalidPdfError` wraps `pypdfium2.PdfiumError`; clean 422 vs 500 split with calibrated log severity. |
-| **v0.5** | 2026-06-01 | Several themes, broken out below. |
+| v0.5 | 2026-06-01 | Several themes, broken out below. |
+| **v0.6** | 2026-06-01 | **Breaking** — category schema expanded from 4 to 5 categories with clearer semantics: `Gaji` (fixed monthly salary), `THR` (Tunjangan Hari Raya — religious-holiday allowance), `Bonus` (annual / structured), `Insentif` (performance-triggered), `Lainnya` (other). The old `Tunjangan` catch-all is gone — its members redistribute into THR (religious-holiday) or Lainnya (generic monthly perks, ECUTI leave). `BONUS_INTERIM`-style performance pay now maps to `Insentif`; `BONUS_POOL`-style annual pay stays `Bonus`. `CategoryTotal` gains a `min` field (smallest single-tx amount per category; `null` when empty). The `/upload` page renders the min stat in each category's summary row and adds a cyan colour for the Insentif accordion. Both single-PDF and batch prompts rewritten to teach the LLM the new five-way distinction. |
 
 **v0.5 in detail:**
 
 - **Mandiri parser.** New `parsers/mandiri.py` for "Tabungan Mandiri" e-Statement. Handles the Indonesian number format (`.` thousands, `,` decimals — opposite of BCA/BRI), sign-prefixed Nominal column (`+`/`-` instead of a DB/CR suffix), multi-line per-transaction blocks grouped by y-gap, `DD MMM YYYY` dates with English month names, and account-name reassembly when the holder name spans two chunks. Validated end-to-end against `sample_mandiri.pdf` — every total matches the document's own summary.
 - **Single-PDF prompt rewrite.** The previous prompt claimed monthly recurrence was the strongest Gaji signal — which the single endpoint can never observe. Rewrote `SYSTEM_PROMPT` to drop the unobservable hint and explicitly list `SAP-DD`, `ECUTI`, `BONUS_INTERIM`, and `BONUS_POOL` as payroll-system labels. Single-PDF Gaji recognition now works on real BRI data (was 0/1, now 1/1 in the test case).
-- **`/upload` page.** New `GET /upload` route serves an inline HTML page with a single `<input type="file" multiple>` — the cleanest way around Swagger UI's per-array-item file-picker limitation. After upload, the page renders a per-category accordion (Gaji / Tunjangan / Bonus / Lainnya) with every transaction's date, source file, amount, description, LLM confidence, and reason.
+- **`/upload` page.** New `GET /upload` route serves an inline HTML page with a single `<input type="file" multiple>` — the cleanest way around Swagger UI's per-array-item file-picker limitation. After upload, the page renders a per-category accordion (Gaji / THR / Bonus / Insentif / Lainnya) with every transaction's date, source file, amount, description, LLM confidence, and reason.
 - **Swagger-friendly schema.** Pinned OpenAPI to 3.0.3 and added a `_custom_openapi` patch that rewrites `contentMediaType` (3.1) into `format: "binary"` (3.0.3-native) so Swagger UI's renderer actually shows a file picker for `/extract` and `/extract-batch`.
 - **`/` redirect & favicon.** `GET /` now `307`s to `/upload` (was `/docs`). `GET /favicon.ico` returns `204` to keep the access log quiet.
 - **BCA name extractor robustness.** `_first_name_line` no longer requires the address to begin with `TANAH` / `JL` / `KOTA` (a hardcode that only matched the sample). It anchors on the universal `KCP / KCU / KK / KANTOR` branch line and takes the chunk immediately below, with multi-chunk reassembly when the name wraps. Works across diverse BCA branches.

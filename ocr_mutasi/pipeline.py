@@ -130,11 +130,18 @@ def run_batch(
         for cc, (src, _) in zip(classified, credits_with_source)
     ]
 
-    # Aggregate per-category totals across the batch.
+    # Aggregate per-category totals across the batch. `min` is the smallest
+    # single-transaction amount in the category (None when the category is
+    # empty) — useful for sanity-checking salary floors, smallest bonus, etc.
     cat_totals: dict[str, CategoryTotal] = {}
-    for cat in ("Gaji", "Tunjangan", "Bonus", "Lainnya"):
+    for cat in ("Gaji", "THR", "Bonus", "Insentif", "Lainnya"):
         items = [c for c in classified_with_src if (c.category or "Lainnya") == cat]
-        cat_totals[cat] = CategoryTotal(count=len(items), sum=sum(c.amount for c in items))
+        amounts = [c.amount for c in items]
+        cat_totals[cat] = CategoryTotal(
+            count=len(items),
+            sum=sum(amounts),
+            min=min(amounts) if amounts else None,
+        )
 
     return BatchExtractionResponse(
         files=file_results,

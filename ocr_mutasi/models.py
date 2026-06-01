@@ -10,7 +10,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 TxType = Literal["DB", "CR"]
-Category = Literal["Gaji", "Tunjangan", "Bonus", "Lainnya"]
+Category = Literal["Gaji", "THR", "Bonus", "Insentif", "Lainnya"]
 
 
 # ----------------------------- low-level chunks -----------------------------
@@ -110,8 +110,15 @@ class BatchClassifiedCredit(ClassifiedCredit):
 
 
 class CategoryTotal(BaseModel):
+    """Per-category roll-up for a batch response.
+
+    `min` is the smallest single-transaction amount in the category (useful
+    for sanity-checking salary floors, smallest bonus, etc.); ``null`` when
+    the category has no transactions.
+    """
     count: int
     sum: float
+    min: Optional[float] = None
 
 
 class BatchAudit(BaseModel):

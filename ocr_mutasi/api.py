@@ -26,7 +26,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 app = FastAPI(
     title="OCR Mutasi",
     version=__version__,
-    description="Extract BCA/BRI bank-statement transactions from PDF and classify credits (Gaji/Tunjangan/Bonus/Lainnya).",
+    description="Extract BCA/BRI/Mandiri bank-statement transactions from PDF and classify credits (Gaji / THR / Bonus / Insentif / Lainnya).",
 )
 # Emit OpenAPI 3.0.3 instead of FastAPI's default 3.1.0. Swagger UI bundled with
 # FastAPI doesn't fully implement 3.1's `contentMediaType` keyword for multi-file
@@ -143,10 +143,12 @@ _UPLOAD_PAGE = """<!doctype html>
     #summary .cat[open] > summary::before { transform: rotate(90deg); }
     #summary .cat .cat-name { font-weight: 600; font-size: 15px; }
     #summary .cat .cat-meta { color: var(--muted); font-size: 13px; }
+    #summary .cat .cat-meta .sep { margin: 0 8px; opacity: .5; }
     #summary .cat .cat-sum { font-variant-numeric: tabular-nums; font-weight: 600; }
     #summary .cat[data-category="Gaji"] .cat-name { color: var(--ok); }
+    #summary .cat[data-category="THR"] .cat-name { color: #f59e0b; }
     #summary .cat[data-category="Bonus"] .cat-name { color: #a855f7; }
-    #summary .cat[data-category="Tunjangan"] .cat-name { color: #f59e0b; }
+    #summary .cat[data-category="Insentif"] .cat-name { color: #06b6d4; }
     #summary .tx-wrap { overflow-x: auto; border-top: 1px solid var(--border); }
     #summary .tx-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     #summary .tx-table th, #summary .tx-table td { padding: 8px 12px; text-align: left;
@@ -181,7 +183,7 @@ _UPLOAD_PAGE = """<!doctype html>
       <ul id="file-list"></ul>
 
       <div class="controls">
-        <label class="opt"><input type="checkbox" id="classify" checked> Classify credits with LLM (Gaji / Tunjangan / Bonus)</label>
+        <label class="opt"><input type="checkbox" id="classify" checked> Classify credits with LLM (Gaji / THR / Bonus / Insentif)</label>
         <button type="submit" id="go">Extract</button>
       </div>
       <div id="status"></div>
@@ -274,24 +276,26 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+const CATEGORIES = ['Gaji', 'THR', 'Bonus', 'Insentif', 'Lainnya'];
+
 function renderSummary(data) {
   const totals = data.audit.category_totals || {};
   const credits = data.credits || [];
   // Group every classified credit by its category (null → Lainnya, matching backend).
-  const byCat = { Gaji: [], Tunjangan: [], Bonus: [], Lainnya: [] };
+  const byCat = Object.fromEntries(CATEGORIES.map(c => [c, []]));
   for (const c of credits) {
     const cat = (c.category || 'Lainnya');
-    if (byCat[cat]) byCat[cat].push(c);
-    else byCat.Lainnya.push(c);
+    (byCat[cat] || byCat.Lainnya).push(c);
   }
   // Sort each group by date ascending so the table reads chronologically.
   for (const k of Object.keys(byCat)) byCat[k].sort((a, b) => a.tanggal.localeCompare(b.tanggal));
 
-  const sections = ['Gaji', 'Tunjangan', 'Bonus', 'Lainnya'].map(cat => {
-    const t = totals[cat] || { count: 0, sum: 0 };
+  const sections = CATEGORIES.map(cat => {
+    const t = totals[cat] || { count: 0, sum: 0, min: null };
     const items = byCat[cat];
     // Expand the high-signal categories by default; collapse Lainnya (usually noisy).
     const openByDefault = cat !== 'Lainnya' && items.length > 0;
+    const minLabel = t.min == null ? '—' : fmtRp(t.min);
     const body = items.length === 0
       ? `<div class="empty">No transactions classified as ${cat}.</div>`
       : `<div class="tx-wrap"><table class="tx-table">
@@ -318,7 +322,7 @@ function renderSummary(data) {
         <summary>
           <span></span>
           <span class="cat-name">${cat}</span>
-          <span class="cat-meta">${t.count} transaction${t.count === 1 ? '' : 's'}</span>
+          <span class="cat-meta">${t.count} tx<span class="sep">·</span>min ${minLabel}</span>
           <span class="cat-sum">${fmtRp(t.sum)}</span>
         </summary>
         ${body}
@@ -327,7 +331,7 @@ function renderSummary(data) {
 
   summary.innerHTML = `
     <div class="card" style="padding: 12px;">
-      <h2 style="margin: 4px 8px 12px; font-size: 16px;">Year totals by category — click a row to see every transaction</h2>
+      <h2 style="margin: 4px 8px 12px; font-size: 16px;">Totals by category — count · minimum · sum. Click a row for every transaction.</h2>
       ${sections}
     </div>`;
 }

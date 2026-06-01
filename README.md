@@ -1,8 +1,8 @@
 # OCR Mutasi
 
-> Backend service that extracts transactions from Indonesian bank-statement PDFs and uses an LLM to classify each *credit* transaction as **Gaji** (salary), **Tunjangan** (allowance), **Bonus**, or **Lainnya** (other).
+> Backend service that extracts transactions from Indonesian bank-statement PDFs and uses an LLM to classify each *credit* transaction as **Gaji** (fixed monthly salary), **THR** (religious-holiday allowance), **Bonus** (annual), **Insentif** (performance), or **Lainnya** (other).
 
-**Current version:** v0.5 — three supported banks, batch endpoint with cross-month classification, in-browser upload page. See the change log in [architecture.md §19](docs/architecture.md#19-change-log).
+**Current version:** v0.6 — three supported banks, 5-category classifier (Gaji / THR / Bonus / Insentif / Lainnya), batch endpoint with cross-month classification, in-browser upload page, per-category `min` stat. See the change log in [architecture.md §19](docs/architecture.md#19-change-log).
 
 **Supported banks** (auto-detected from page 1 — no client flag needed):
 - **BCA "Rekening Tahapan"** — 5-column layout, `DB` suffix marks debits.
@@ -41,7 +41,7 @@
 
 ## 1. Overview & Use Case
 
-A user uploads one or more monthly bank-statement PDFs. The backend extracts every transaction, then sends just the **credit rows** to an LLM (Azure OpenAI `gpt-4.1-mini`) to classify each as Gaji, Tunjangan, Bonus, or Lainnya. The response is structured JSON with per-row classification, per-row confidence, and a year-level rollup when the batch endpoint is used.
+A user uploads one or more monthly bank-statement PDFs. The backend extracts every transaction, then sends just the **credit rows** to an LLM (Azure OpenAI `gpt-4.1-mini`) to classify each as Gaji, THR, Bonus, Insentif, or Lainnya. The response is structured JSON with per-row classification, per-row confidence, and a year-level rollup when the batch endpoint is used.
 
 **Typical flow:** the user selects a year of monthly mutations in your UI → the UI POSTs them as `multipart/form-data` to `/api/v1/mutations/extract-batch` → a single response gives the UI everything it needs to render income, allowances, and bonuses by category.
 
@@ -88,10 +88,11 @@ Expected output for the included 12-month BRI sample:
 
 ```json
 {
-  "Gaji":      { "count": 12, "sum": 120000000.0 },
-  "Tunjangan": { "count": 3,  "sum": 45000000.0 },
-  "Bonus":     { "count": 2,  "sum": 44000000.00 },
-  "Lainnya":   { "count": 81, "sum": 50000000.0 }
+  "Gaji":     { "count": 12, "sum": 120000000.0, "min": 9500000.0 },
+  "THR":      { "count": 1,  "sum": 23000000.0,  "min": 23000000.0 },
+  "Bonus":    { "count": 1,  "sum": 37000000.0,  "min": 37000000.0 },
+  "Insentif": { "count": 1,  "sum": 7000000.0,   "min": 7000000.0 },
+  "Lainnya":  { "count": 83, "sum": 72000000.0,  "min": 10000.0 }
 }
 ```
 
@@ -236,17 +237,18 @@ The simplest path. Open the URL in a browser, click **Choose PDFs**, multi-selec
 After the response arrives, the page renders a **per-category accordion**:
 
 ```
-▾ Gaji          12 transactions       Rp 120,000,000.00
+▾ Gaji         12 tx · min Rp 9,500,000.00      Rp 120,000,000.00
    Date        Source file              Amount       Description        Conf.  Reason
-   2025-05-23  Mutasi_Mei_2025.pdf      Rp 9.1M      SAP-DD TRANSACTION 0.95   recurs monthly…
-   2025-06-25  Mutasi_Juni_2025.pdf     Rp 9.1M      SAP-DD TRANSACTION 0.95   …
-   …                                                                                    
-▸ Tunjangan     3 transactions        Rp 45,000,000.00     (click row to expand)
-▸ Bonus         2 transactions        Rp 44,000,000.00
-▸ Lainnya       81 transactions       Rp 50,000,000.00
+   2025-05-23  Mutasi_Mei_2025.pdf      Rp 9.5M      SAP-DD TRANSACTION 0.95   recurs monthly…
+   2025-06-25  Mutasi_Juni_2025.pdf     Rp 9.5M      SAP-DD TRANSACTION 0.95   …
+   …
+▸ THR           1 tx · min Rp 23,000,000.00     Rp 23,000,000.00    (click row to expand)
+▸ Bonus         1 tx · min Rp 37,000,000.00     Rp 37,000,000.00
+▸ Insentif      1 tx · min Rp 7,000,000.00      Rp 7,000,000.00
+▸ Lainnya      83 tx · min Rp 10,000.00         Rp 72,000,000.00
 ```
 
-Gaji / Tunjangan / Bonus expand by default; Lainnya stays collapsed (usually noisy). Category names are colour-coded. The full raw JSON is available behind a collapsible toggle.
+Gaji / THR / Bonus / Insentif expand by default; Lainnya stays collapsed (usually noisy). Category names are colour-coded. The full raw JSON is available behind a collapsible toggle.
 
 This page bypasses Swagger UI's array-renderer (which insists on one file slot per array item with an "Add item" button — a Swagger UI design choice that no OpenAPI schema can work around).
 
@@ -403,7 +405,7 @@ The `200 OK` response always includes an `audit` block. Even on a successful res
       "type": "CR",
       "saldo": 11000000.00,
       "page": 4,
-      "category": "Lainnya",              // Gaji | Tunjangan | Bonus | Lainnya | null
+      "category": "Lainnya",              // Gaji | THR | Bonus | Insentif | Lainnya | null
       "confidence": 0.7,                  // 0..1; null if the LLM call failed
       "reason": "No salary keywords; self-transfer."
     }
@@ -455,10 +457,11 @@ The `200 OK` response always includes an `audit` block. Even on a successful res
     "credits_total": 98,
     "classifier_errors": [],
     "category_totals": {
-      "Gaji":      { "count": 12, "sum": 120000000.0 },
-      "Tunjangan": { "count":  3, "sum":  45000000.0 },
-      "Bonus":     { "count":  2, "sum":  44000000.00 },
-      "Lainnya":   { "count": 81, "sum":  50000000.0 }
+      "Gaji":     { "count": 12, "sum": 120000000.0, "min":  9500000.0 },
+      "THR":      { "count":  1, "sum":  23000000.0, "min": 23000000.0 },
+      "Bonus":    { "count":  1, "sum":  37000000.0, "min": 37000000.0 },
+      "Insentif": { "count":  1, "sum":   7000000.0, "min":  7000000.0 },
+      "Lainnya":  { "count": 83, "sum":  72000000.0, "min":    10000.0 }
     }
   }
 }
@@ -542,12 +545,13 @@ For exact column boundary calibration and gotchas per bank, see [architecture §
 
 Year-level totals returned by `/extract-batch`:
 
-| Category | Count | Year sum (Rp) | What it caught |
-|---|---:|---:|---|
-| **Gaji** | **12** | **120,000,000** | All 12 monthly `SAP-DD TRANSACTION` payroll deposits — recognised purely from cross-month recurrence, since the description has no salary keyword |
-| **Tunjangan** | 3 | 45,000,000 | 1× `THR_Islam_2026`, 2× `ECUTI` leave allowances |
-| **Bonus** | 2 | 44,000,000 | `BONUS_INTERIM_2025`, `BONUS_POOL_2025_1` |
-| Lainnya | 81 | 50,000,000 | P2P transfers, refunds, etc. |
+| Category | Count | Year sum (Rp) | Min single tx (Rp) | What it caught |
+|---|---:|---:|---:|---|
+| **Gaji**     | **12** | **120,000,000** |  9,500,000 | All 12 monthly `SAP-DD TRANSACTION` payroll deposits — recognised purely from cross-month recurrence, since the description has no salary keyword |
+| **THR**      | 1      |  23,000,000     | 23,000,000 | 1× `THR_Islam_2026` (religious-holiday allowance) |
+| **Bonus**    | 1      |  37,000,000     | 37,000,000 | 1× `BONUS_POOL_2025_1` (annual / structured) |
+| **Insentif** | 1      |   7,000,000     |  7,000,000 | 1× `BONUS_INTERIM_2025` (performance-triggered, distinct from annual Bonus) |
+| Lainnya      | 83     |  72,000,000     |     10,000 | P2P transfers, refunds, ECUTI leave allowances, etc. |
 
 The same LLM call on per-month-isolated credits produced **0 Gaji detections**. Cross-month context turned 0 → 12 with 0.95 confidence — the most concrete validation possible that the batch endpoint solves a real problem.
 
