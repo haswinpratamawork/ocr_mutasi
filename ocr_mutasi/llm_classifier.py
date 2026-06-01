@@ -42,14 +42,26 @@ naming is the company's own bonus-program prefix; whether it's annual or \
 interim doesn't matter — it's still Bonus. **DO NOT classify a `BONUS_*` \
 label as Insentif.**
 
-2. **Any description containing `ECUTI`, `INSENTIF`, `INCENTIVE`, `KOMISI`, \
-or `COMMISSION` → "Insentif"** — these are performance-tied extra payments. \
-`ECUTI` (extra cuti / extra-leave payout) is a performance/seniority-based \
-allowance and belongs here, NOT in Lainnya.
-
-3. **Any description containing `THR`, `HARI RAYA`, or `TUNJANGAN HARI RAYA` \
+2. **Any description containing `THR`, `HARI RAYA`, or `TUNJANGAN HARI RAYA` \
 → "THR"** — Tunjangan Hari Raya, religious-holiday allowance. Examples: \
-`THR_Islam`, `THR_Idulfitri`, `THR_Lebaran`. Usually larger than Gaji.
+`THR_Islam`, `THR_Idulfitri`, `THR_Lebaran`. Usually larger than Gaji. \
+(This rule must come before rule 3 so `TUNJANGAN HARI RAYA` is routed to \
+THR rather than the generic-tunjangan rule below.)
+
+3. **Any description containing one of the following → "Insentif"** — \
+performance- or work-related extra payments:
+   - explicit incentive labels: `ECUTI` (extra cuti / extra-leave payout), \
+`INSENTIF`, `INCENTIVE`, `KOMISI`, `COMMISSION`, `PERFORMANCE_BONUS`, \
+`COMMISSION_PAY`;
+   - work-related `TUNJANGAN <kind>` allowances (i.e. any TUNJANGAN that \
+isn't TUNJANGAN HARI RAYA): `TUNJANGAN TRANSPORT` / `TRANSPORTASI`, \
+`TUNJANGAN MAKAN` / `UANG MAKAN` / `MEAL_ALLOWANCE`, `TUNJANGAN PULSA` / \
+`PHONE_ALLOWANCE`, `TUNJANGAN KELUAR KOTA` / `DINAS LUAR KOTA` / \
+`TRAVEL_ALLOWANCE`, `TUNJANGAN KESEHATAN`, `TUNJANGAN ANAK`, \
+`TUNJANGAN ISTRI`, and so on.
+
+   These are work-tied perks paid alongside Gaji — they belong in Insentif, \
+NOT in Lainnya.
 
 4. **Any description containing `GAJI`, `PAYROLL`, `SALARY`, `KR OTOMATIS`, \
 `SAP-DD`, `TRSF GAJI`, `PAYROLL-DEPOSIT`, or `SALARY-CRDT` → "Gaji"** — \
@@ -58,15 +70,15 @@ corporates for monthly payroll.
 
 5. **Otherwise → "Lainnya"** — peer-to-peer transfers (`Transfer Dari <name>`, \
 `BIF TRANSFER DR <name>`), refunds, interest, sale proceeds, self-transfers, \
-reimbursements, generic monthly tunjangan (transport / kesehatan / pulsa) \
-that lack any of the labels in rules 1–4.
+reimbursements, anything that lacks the labels in rules 1–4.
 
 ## Output
 
 Return strict JSON matching the schema. For each row include a short reason \
 (≤25 words) that NAMES the label that drove your decision (e.g. \
-"Contains BONUS_INTERIM label → Bonus per rule 1"). \
-Do NOT downgrade an explicit Gaji/THR/Bonus/Insentif label to Lainnya."""
+"Contains BONUS_INTERIM label → Bonus per rule 1" or "TUNJANGAN TRANSPORT \
+label → Insentif per rule 3"). Do NOT downgrade an explicit \
+Gaji/THR/Bonus/Insentif label to Lainnya."""
 
 
 _RESPONSE_SCHEMA = {
@@ -168,14 +180,26 @@ bonus-program naming and ALL such rows are Bonus regardless of whether \
 they're annual, interim, mid-year, or quarterly. **DO NOT split BONUS_INTERIM \
 into Insentif.**
 
-2. **Any description containing `ECUTI`, `INSENTIF`, `INCENTIVE`, `KOMISI`, \
-or `COMMISSION` → "Insentif"** — these are performance-tied extra payments. \
-`ECUTI` (extra cuti / extra-leave payout) belongs here, NOT in Lainnya — \
-it's a performance/seniority-based allowance in Indonesian corporate practice.
-
-3. **Any description containing `THR`, `HARI RAYA`, or `TUNJANGAN HARI RAYA` \
+2. **Any description containing `THR`, `HARI RAYA`, or `TUNJANGAN HARI RAYA` \
 → "THR"** — Tunjangan Hari Raya, religious-holiday allowance. Examples: \
-`THR_Islam`, `THR_Idulfitri`, `THR_Lebaran`.
+`THR_Islam`, `THR_Idulfitri`, `THR_Lebaran`. (This rule must come before \
+rule 3 so `TUNJANGAN HARI RAYA` is routed to THR rather than the \
+generic-tunjangan rule below.)
+
+3. **Any description containing one of the following → "Insentif"** — \
+performance- or work-related extra payments:
+   - explicit incentive labels: `ECUTI` (extra cuti / extra-leave payout), \
+`INSENTIF`, `INCENTIVE`, `KOMISI`, `COMMISSION`, `PERFORMANCE_BONUS`, \
+`COMMISSION_PAY`;
+   - work-related `TUNJANGAN <kind>` allowances (i.e. any TUNJANGAN that \
+isn't TUNJANGAN HARI RAYA): `TUNJANGAN TRANSPORT` / `TRANSPORTASI`, \
+`TUNJANGAN MAKAN` / `UANG MAKAN` / `MEAL_ALLOWANCE`, `TUNJANGAN PULSA` / \
+`PHONE_ALLOWANCE`, `TUNJANGAN KELUAR KOTA` / `DINAS LUAR KOTA` / \
+`TRAVEL_ALLOWANCE`, `TUNJANGAN KESEHATAN`, `TUNJANGAN ANAK`, \
+`TUNJANGAN ISTRI`, and so on.
+
+   These are work-tied perks paid alongside Gaji — they belong in Insentif, \
+NOT in Lainnya.
 
 4. **Any description containing `GAJI`, `PAYROLL`, `SALARY`, `KR OTOMATIS`, \
 `SAP-DD`, `TRSF GAJI`, `PAYROLL-DEPOSIT`, `SALARY-CRDT` → "Gaji"** — explicit \
@@ -189,8 +213,7 @@ you see all months at once).
 
 6. **Otherwise → "Lainnya"** — peer-to-peer transfers (`Transfer Dari <name>`, \
 `BIF TRANSFER DR <name>`), refunds, interest, sale proceeds, reimbursements, \
-self-transfers, generic monthly tunjangan (transport / kesehatan / pulsa) \
-without any of the labels above.
+self-transfers, anything without any of the labels above.
 
 ## Output
 
@@ -198,8 +221,9 @@ The user sends a JSON array. Each item has: id (int), source_file (PDF this \
 row came from), tanggal (ISO date), amount, keterangan (description). Return \
 strict JSON with one classification per id. Reason ≤25 words — name the label \
 or pattern that drove the decision (e.g. "BONUS_INTERIM label → Bonus per \
-rule 1" or "Recurring monthly SAP-DD → Gaji per rule 5"). Do NOT downgrade \
-an explicit Gaji/THR/Bonus/Insentif label to Lainnya."""
+rule 1", "TUNJANGAN TRANSPORT → Insentif per rule 3", or "Recurring monthly \
+SAP-DD → Gaji per rule 5"). Do NOT downgrade an explicit \
+Gaji/THR/Bonus/Insentif label to Lainnya."""
 
 
 def classify_credits_batch(
