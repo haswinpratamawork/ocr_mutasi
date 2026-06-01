@@ -2,7 +2,7 @@
 
 > Backend service that extracts transactions from Indonesian bank-statement PDFs and uses an LLM to classify each *credit* transaction as **Gaji** (fixed monthly salary), **THR** (religious-holiday allowance), **Bonus** (any `BONUS_*` label, annual or interim), **Insentif** (performance pay and work-related `TUNJANGAN <kind>` allowances), or **Lainnya** (other).
 
-**Current version:** v0.6 — three supported banks, 5-category classifier (Gaji / THR / Bonus / Insentif / Lainnya), batch endpoint with cross-month classification, in-browser upload page, per-category `min` stat. See the change log in [architecture.md §19](docs/architecture.md#19-change-log).
+**Current version:** v0.7 — three supported banks, 5-category classifier (Gaji / THR / Bonus / Insentif / Lainnya), batch endpoint with cross-month classification, in-browser upload page, per-category `min` stat. v0.7 adds `SMEMFTS` / `LLG` as recognised payroll channels and bumps the default LLM timeout to 120 s for large batches. See the change log in [architecture.md §19](docs/architecture.md#19-change-log).
 
 **Supported banks** (auto-detected from page 1 — no client flag needed):
 - **BCA "Rekening Tahapan"** — 5-column layout, `DB` suffix marks debits.
@@ -79,8 +79,10 @@ The LLM follows these six rules verbatim from the system prompt. Each row's `rea
 1. Description contains `BONUS_…` or `BONUS ` → **Bonus**
 2. Description contains `THR` / `HARI RAYA` / `TUNJANGAN HARI RAYA` → **THR** *(must run before rule 3 so the generic-tunjangan catchall doesn't swallow it)*
 3. Description contains `ECUTI` / `INSENTIF` / `INCENTIVE` / `KOMISI` / `COMMISSION` **or** any `TUNJANGAN <kind>` other than Hari Raya (transport, makan, pulsa, keluar kota, kesehatan, …) → **Insentif**
-4. Description contains `GAJI` / `PAYROLL` / `SALARY` / `KR OTOMATIS` / `SAP-DD` / `TRSF GAJI` / `PAYROLL-DEPOSIT` / `SALARY-CRDT` → **Gaji**
-5. *(Batch endpoint only)* No label match, but the same amount recurs on roughly the same day-of-month across multiple uploaded PDFs → **Gaji** (cross-month recurrence is the strongest unlabelled salary signal)
+4. Description contains an explicit payroll-disbursement keyword → **Gaji**. Two flavours:
+   - employer-facing labels: `GAJI` / `PAYROLL` / `SALARY` / `TRSF GAJI` / `PAYROLL-DEPOSIT` / `SALARY-CRDT`
+   - Indonesian bank bulk-payroll product labels: `SAP-DD` (SAP Direct Deposit), `KR OTOMATIS` (BCA auto-credit), `SMEMFTS` (BCA SME Mass Funds Transfer Service — bulk payroll), `LLG-DEUTSCHE BANK` / any `LLG ` prefix (Lalu Lintas Giro — BI bulk-clearing channel commonly used for salary/allowance disbursement)
+5. *(Batch endpoint only)* No label match, but **the same corporate sender** (`PT <X>`, `<X> INDO`, …) appears in **multiple uploaded months** → **Gaji**. Sender consistency is the cross-month signal — real salaries vary in amount month-to-month (overtime, deductions, prorated months, bundled THR/bonus), so amount equality is NOT required.
 6. Otherwise → **Lainnya**
 
 The full prompt text lives in `ocr_mutasi/llm_classifier.py` (`SYSTEM_PROMPT` for single-PDF, `BATCH_SYSTEM_PROMPT` for batch).
@@ -774,6 +776,8 @@ All settings are read from `.env` once at startup (singleton via `pydantic-setti
 | Non-empty `audit.parse_warnings` | 200 | A row matched a header heuristic but its amount didn't parse | Look at the warning; usually a data oddity in one row |
 | Non-empty `audit.classifier_errors` | 200 | Azure OpenAI was unreachable / returned bad JSON | Extraction data is still valid. Retry the request once Azure is healthy. |
 | All credits classified `Lainnya`, even payroll-looking ones | 200 | You hit `/extract` per month instead of `/extract-batch` | Switch to the batch endpoint — single-PDF can't see cross-month recurrence (see §1 and §5.2). |
+| `audit.classifier_errors` shows "Request timed out" and every credit is `category: null` | 200 | The LLM call for a large batch (hundreds of credits) exceeded `LLM_REQUEST_TIMEOUT_S`. The pipeline returns extraction data with unclassified credits and an error entry. | Bump `LLM_REQUEST_TIMEOUT_S` in `.env` to 120 (or higher for very busy accounts — the batch endpoint internally doubles this value). Default is 120s. |
+| Big monthly salary deposits (e.g. via BCA `SMEMFTS` / `LLG`) classified as Lainnya | 200 | Pre-v0.7 prompt only listed `GAJI`/`SAP-DD`/`KR OTOMATIS` as payroll keywords. v0.7 adds `SMEMFTS` (BCA SME Mass Funds Transfer) and `LLG` (Lalu Lintas Giro). | Pull the latest build. |
 | A category looks wrong (e.g. `BONUS_INTERIM` classified as Insentif) | 200 | The LLM may be inferring instead of following rules — but every classified row's `reason` field cites which rule fired. Check the reason. | If the cited rule number doesn't match what §1 documents, the prompt drifted; see `SYSTEM_PROMPT` / `BATCH_SYSTEM_PROMPT` in `ocr_mutasi/llm_classifier.py`. |
 | A `TUNJANGAN` row ended up in `Lainnya` | 200 | Pre-v0.6 behaviour — generic tunjangan used to fall into Lainnya. v0.6 routes work-related `TUNJANGAN <kind>` to **Insentif** via rule 3. | Pull the latest build and restart uvicorn. |
 | Swagger UI shows "Add string item" for `files` instead of a file picker | n/a | Stale build — pull v0.5 (or restart uvicorn). v0.5 patches the OpenAPI schema to emit `format: "binary"`. | If still broken after restart, see FAQ §14. |

@@ -63,22 +63,33 @@ isn't TUNJANGAN HARI RAYA): `TUNJANGAN TRANSPORT` / `TRANSPORTASI`, \
    These are work-tied perks paid alongside Gaji — they belong in Insentif, \
 NOT in Lainnya.
 
-4. **Any description containing `GAJI`, `PAYROLL`, `SALARY`, `KR OTOMATIS`, \
-`SAP-DD`, `TRSF GAJI`, `PAYROLL-DEPOSIT`, or `SALARY-CRDT` → "Gaji"** — \
-explicit payroll-system labels. SAP-DD = SAP Direct Deposit, widely used by \
-corporates for monthly payroll.
+4. **Any description containing one of the following payroll-disbursement \
+labels → "Gaji"**:
+   - employer-facing labels: `GAJI`, `PAYROLL`, `SALARY`, `TRSF GAJI`, \
+`PAYROLL-DEPOSIT`, `SALARY-CRDT`;
+   - Indonesian bank bulk-payroll product labels: `SAP-DD` (SAP Direct \
+Deposit), `KR OTOMATIS` (BCA auto-credit), `SMEMFTS` (BCA SME Mass Funds \
+Transfer Service — bulk payroll product), `LLG-DEUTSCHE BANK` / `LLG `*\
+(Lalu Lintas Giro — BI bulk-clearing channel commonly used for \
+salary/allowance disbursement).
 
-5. **Otherwise → "Lainnya"** — peer-to-peer transfers (`Transfer Dari <name>`, \
-`BIF TRANSFER DR <name>`), refunds, interest, sale proceeds, self-transfers, \
-reimbursements, anything that lacks the labels in rules 1–4.
+   When one of these labels appears together with a corporate sender name \
+(e.g. `PT TUV RHEINLAND`, `TUV RHEINLAND INDO`, or any `PT <X>` / `<X> INDO`), \
+it's almost certainly Gaji — DO NOT downgrade it to Lainnya.
+
+5. **Otherwise → "Lainnya"** — peer-to-peer transfers from a person's name \
+(`Transfer Dari <name>`, `BIF TRANSFER DR <name>`), refunds, interest, sale \
+proceeds, self-transfers, reimbursements, anything that lacks the labels in \
+rules 1–4.
 
 ## Output
 
 Return strict JSON matching the schema. For each row include a short reason \
 (≤25 words) that NAMES the label that drove your decision (e.g. \
-"Contains BONUS_INTERIM label → Bonus per rule 1" or "TUNJANGAN TRANSPORT \
-label → Insentif per rule 3"). Do NOT downgrade an explicit \
-Gaji/THR/Bonus/Insentif label to Lainnya."""
+"Contains BONUS_INTERIM label → Bonus per rule 1", "TUNJANGAN TRANSPORT \
+label → Insentif per rule 3", or "SMEMFTS + PT TUV RHEINLAND sender → Gaji \
+per rule 4"). Do NOT downgrade an explicit Gaji/THR/Bonus/Insentif label to \
+Lainnya."""
 
 
 _RESPONSE_SCHEMA = {
@@ -201,15 +212,28 @@ isn't TUNJANGAN HARI RAYA): `TUNJANGAN TRANSPORT` / `TRANSPORTASI`, \
    These are work-tied perks paid alongside Gaji — they belong in Insentif, \
 NOT in Lainnya.
 
-4. **Any description containing `GAJI`, `PAYROLL`, `SALARY`, `KR OTOMATIS`, \
-`SAP-DD`, `TRSF GAJI`, `PAYROLL-DEPOSIT`, `SALARY-CRDT` → "Gaji"** — explicit \
-payroll-system labels. SAP-DD = SAP Direct Deposit, widely used for monthly \
-payroll.
+4. **Any description containing one of the following payroll-disbursement \
+labels → "Gaji"**:
+   - employer-facing labels: `GAJI`, `PAYROLL`, `SALARY`, `TRSF GAJI`, \
+`PAYROLL-DEPOSIT`, `SALARY-CRDT`;
+   - Indonesian bank bulk-payroll product labels: `SAP-DD` (SAP Direct \
+Deposit), `KR OTOMATIS` (BCA auto-credit), `SMEMFTS` (BCA SME Mass Funds \
+Transfer Service — bulk payroll product), `LLG-DEUTSCHE BANK` / `LLG ` \
+(Lalu Lintas Giro — BI bulk-clearing channel commonly used for \
+salary/allowance disbursement).
 
-5. **No label match? Use cross-month recurrence.** Same (or very similar) \
-amount, same day-of-month, same source, appearing across MULTIPLE months → \
-"Gaji" (this is the recurring-monthly-deposit signal you can verify because \
-you see all months at once).
+   When one of these labels appears together with a corporate sender name \
+(e.g. `PT TUV RHEINLAND`, `TUV RHEINLAND INDO`, or any `PT <X>` / `<X> INDO`), \
+it's almost certainly Gaji — DO NOT downgrade it to Lainnya.
+
+5. **No label match? Use cross-month recurrence.** The strongest cross-month \
+salary signal is **the same SENDER appearing across multiple months**, not \
+amount equality. Real salaries vary monthly due to overtime, deductions, \
+prorated months, raises, or bundled THR/bonus. A credit whose description \
+names the SAME corporate employer (e.g. `PT TUV RHEINLAND` / `TUV RHEINLAND \
+INDO`) and that you can see in ≥ 3 different months → "Gaji", even if amounts \
+range widely (e.g. 400K, 11M, 47M). Day-of-month consistency is a weaker \
+secondary hint.
 
 6. **Otherwise → "Lainnya"** — peer-to-peer transfers (`Transfer Dari <name>`, \
 `BIF TRANSFER DR <name>`), refunds, interest, sale proceeds, reimbursements, \

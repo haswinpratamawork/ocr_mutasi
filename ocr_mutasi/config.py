@@ -20,7 +20,11 @@ class Settings(BaseSettings):
     app_port: int = 8000
 
     # Limits
-    llm_request_timeout_s: float = 30.0
+    # Default 120s — the batch endpoint doubles this for cross-month calls,
+    # giving 240s. Real-world batches of ~300 credits (a busy account, 12
+    # months) complete in ~140s; the prior 30s default timed out and left
+    # every credit unclassified.
+    llm_request_timeout_s: float = 120.0
     max_pdf_bytes: int = 20_000_000
 
     model_config = SettingsConfigDict(
