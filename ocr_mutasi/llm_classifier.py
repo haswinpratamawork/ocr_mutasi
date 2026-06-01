@@ -58,7 +58,13 @@ isn't TUNJANGAN HARI RAYA): `TUNJANGAN TRANSPORT` / `TRANSPORTASI`, \
 `TUNJANGAN MAKAN` / `UANG MAKAN` / `MEAL_ALLOWANCE`, `TUNJANGAN PULSA` / \
 `PHONE_ALLOWANCE`, `TUNJANGAN KELUAR KOTA` / `DINAS LUAR KOTA` / \
 `TRAVEL_ALLOWANCE`, `TUNJANGAN KESEHATAN`, `TUNJANGAN ANAK`, \
-`TUNJANGAN ISTRI`, and so on.
+`TUNJANGAN ISTRI`, and so on;
+   - **Lalu Lintas Giro allowance channels** — any description containing \
+`LLG-DEUTSCHE BANK` or starting with `LLG ` (BI bulk-clearing channel used \
+for allowance disbursement, distinct from the main payroll channel). A row \
+like `KR OTOMATIS LLG-DEUTSCHE BANK | PT TUV RHEINLAND` is **Insentif** — \
+this rule fires BEFORE rule 4's KR OTOMATIS match, so LLG always wins for \
+mixed labels.
 
    These are work-tied perks paid alongside Gaji — they belong in Insentif, \
 NOT in Lainnya.
@@ -68,10 +74,9 @@ labels → "Gaji"**:
    - employer-facing labels: `GAJI`, `PAYROLL`, `SALARY`, `TRSF GAJI`, \
 `PAYROLL-DEPOSIT`, `SALARY-CRDT`;
    - Indonesian bank bulk-payroll product labels: `SAP-DD` (SAP Direct \
-Deposit), `KR OTOMATIS` (BCA auto-credit), `SMEMFTS` (BCA SME Mass Funds \
-Transfer Service — bulk payroll product), `LLG-DEUTSCHE BANK` / `LLG `*\
-(Lalu Lintas Giro — BI bulk-clearing channel commonly used for \
-salary/allowance disbursement).
+Deposit), `KR OTOMATIS` (BCA auto-credit, when NOT accompanied by an `LLG` \
+label — rule 3 catches the LLG case first), `SMEMFTS` (BCA SME Mass Funds \
+Transfer Service — the primary salary channel).
 
    When one of these labels appears together with a corporate sender name \
 (e.g. `PT TUV RHEINLAND`, `TUV RHEINLAND INDO`, or any `PT <X>` / `<X> INDO`), \
@@ -207,7 +212,13 @@ isn't TUNJANGAN HARI RAYA): `TUNJANGAN TRANSPORT` / `TRANSPORTASI`, \
 `TUNJANGAN MAKAN` / `UANG MAKAN` / `MEAL_ALLOWANCE`, `TUNJANGAN PULSA` / \
 `PHONE_ALLOWANCE`, `TUNJANGAN KELUAR KOTA` / `DINAS LUAR KOTA` / \
 `TRAVEL_ALLOWANCE`, `TUNJANGAN KESEHATAN`, `TUNJANGAN ANAK`, \
-`TUNJANGAN ISTRI`, and so on.
+`TUNJANGAN ISTRI`, and so on;
+   - **Lalu Lintas Giro allowance channels** — any description containing \
+`LLG-DEUTSCHE BANK` or starting with `LLG ` (BI bulk-clearing channel used \
+for allowance disbursement, distinct from the main payroll channel). A row \
+like `KR OTOMATIS LLG-DEUTSCHE BANK | PT TUV RHEINLAND` is **Insentif** — \
+this rule fires BEFORE rule 4's KR OTOMATIS match, so LLG always wins for \
+mixed labels.
 
    These are work-tied perks paid alongside Gaji — they belong in Insentif, \
 NOT in Lainnya.
@@ -217,10 +228,9 @@ labels → "Gaji"**:
    - employer-facing labels: `GAJI`, `PAYROLL`, `SALARY`, `TRSF GAJI`, \
 `PAYROLL-DEPOSIT`, `SALARY-CRDT`;
    - Indonesian bank bulk-payroll product labels: `SAP-DD` (SAP Direct \
-Deposit), `KR OTOMATIS` (BCA auto-credit), `SMEMFTS` (BCA SME Mass Funds \
-Transfer Service — bulk payroll product), `LLG-DEUTSCHE BANK` / `LLG ` \
-(Lalu Lintas Giro — BI bulk-clearing channel commonly used for \
-salary/allowance disbursement).
+Deposit), `KR OTOMATIS` (BCA auto-credit, when NOT accompanied by an `LLG` \
+label — rule 3 catches the LLG case first), `SMEMFTS` (BCA SME Mass Funds \
+Transfer Service — the primary salary channel).
 
    When one of these labels appears together with a corporate sender name \
 (e.g. `PT TUV RHEINLAND`, `TUV RHEINLAND INDO`, or any `PT <X>` / `<X> INDO`), \
