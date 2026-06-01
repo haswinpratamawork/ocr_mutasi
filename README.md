@@ -90,9 +90,9 @@ Expected output for the included 12-month BRI sample:
 {
   "Gaji":     { "count": 12, "sum": 120000000.0, "min": 9500000.0 },
   "THR":      { "count": 1,  "sum": 23000000.0,  "min": 23000000.0 },
-  "Bonus":    { "count": 1,  "sum": 37000000.0,  "min": 37000000.0 },
-  "Insentif": { "count": 1,  "sum": 7000000.0,   "min": 7000000.0 },
-  "Lainnya":  { "count": 83, "sum": 72000000.0,  "min": 10000.0 }
+  "Bonus":    { "count": 2,  "sum": 44000000.0,  "min": 7000000.0 },
+  "Insentif": { "count": 2,  "sum": 21000000.0,  "min": 10000000.0 },
+  "Lainnya":  { "count": 81, "sum": 50000000.0,  "min": 10000.0 }
 }
 ```
 
@@ -243,9 +243,9 @@ After the response arrives, the page renders a **per-category accordion**:
    2025-06-25  Mutasi_Juni_2025.pdf     Rp 9.5M      SAP-DD TRANSACTION 0.95   …
    …
 ▸ THR           1 tx · min Rp 23,000,000.00     Rp 23,000,000.00    (click row to expand)
-▸ Bonus         1 tx · min Rp 37,000,000.00     Rp 37,000,000.00
-▸ Insentif      1 tx · min Rp 7,000,000.00      Rp 7,000,000.00
-▸ Lainnya      83 tx · min Rp 10,000.00         Rp 72,000,000.00
+▸ Bonus         2 tx · min Rp 7,000,000.00      Rp 44,000,000.00
+▸ Insentif      2 tx · min Rp 10,000,000.00     Rp 21,000,000.00
+▸ Lainnya      81 tx · min Rp 10,000.00         Rp 50,000,000.00
 ```
 
 Gaji / THR / Bonus / Insentif expand by default; Lainnya stays collapsed (usually noisy). Category names are colour-coded. The full raw JSON is available behind a collapsible toggle.
@@ -459,9 +459,9 @@ The `200 OK` response always includes an `audit` block. Even on a successful res
     "category_totals": {
       "Gaji":     { "count": 12, "sum": 120000000.0, "min":  9500000.0 },
       "THR":      { "count":  1, "sum":  23000000.0, "min": 23000000.0 },
-      "Bonus":    { "count":  1, "sum":  37000000.0, "min": 37000000.0 },
-      "Insentif": { "count":  1, "sum":   7000000.0, "min":  7000000.0 },
-      "Lainnya":  { "count": 83, "sum":  72000000.0, "min":    10000.0 }
+      "Bonus":    { "count":  2, "sum":  44000000.0, "min":  7000000.0 },
+      "Insentif": { "count":  2, "sum":  21000000.0, "min": 10000000.0 },
+      "Lainnya":  { "count": 81, "sum":  50000000.0, "min":    10000.0 }
     }
   }
 }
@@ -547,11 +547,11 @@ Year-level totals returned by `/extract-batch`:
 
 | Category | Count | Year sum (Rp) | Min single tx (Rp) | What it caught |
 |---|---:|---:|---:|---|
-| **Gaji**     | **12** | **120,000,000** |  9,500,000 | All 12 monthly `SAP-DD TRANSACTION` payroll deposits — recognised purely from cross-month recurrence, since the description has no salary keyword |
-| **THR**      | 1      |  23,000,000     | 23,000,000 | 1× `THR_Islam_2026` (religious-holiday allowance) |
-| **Bonus**    | 1      |  37,000,000     | 37,000,000 | 1× `BONUS_POOL_2025_1` (annual / structured) |
-| **Insentif** | 1      |   7,000,000     |  7,000,000 | 1× `BONUS_INTERIM_2025` (performance-triggered, distinct from annual Bonus) |
-| Lainnya      | 83     |  72,000,000     |     10,000 | P2P transfers, refunds, ECUTI leave allowances, etc. |
+| **Gaji**     | **12** | **120,000,000** |  9,500,000 | All 12 monthly `SAP-DD TRANSACTION` payroll deposits — recognised purely from cross-month recurrence (rule 5) |
+| **THR**      | 1      |  23,000,000     | 23,000,000 | 1× `THR_Islam_2026` (rule 3) |
+| **Bonus**    | 2      |  44,000,000     |  7,000,000 | 1× `BONUS_POOL_2025_1`, 1× `BONUS_INTERIM_2025` — all `BONUS_*` labels are Bonus (rule 1) |
+| **Insentif** | 2      |  21,000,000     | 10,000,000 | 2× `ECUTI` extra-leave payouts (rule 2 — performance-tied) |
+| Lainnya      | 81     |  50,000,000     |     10,000 | P2P transfers, refunds, etc. |
 
 The same LLM call on per-month-isolated credits produced **0 Gaji detections**. Cross-month context turned 0 → 12 with 0.95 confidence — the most concrete validation possible that the batch endpoint solves a real problem.
 

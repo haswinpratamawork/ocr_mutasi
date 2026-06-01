@@ -449,11 +449,11 @@ Per-parser internal types (`_BcaLayout`, `_BriLayout`, `Row`) live in the parser
     "credits_total": 98,
     "classifier_errors": [],
     "category_totals": {
-      "Gaji":     { "count": 12, "sum": 120000000.00, "min": 9500000.00 },
+      "Gaji":     { "count": 12, "sum": 120000000.00, "min":  9500000.00 },
       "THR":      { "count":  1, "sum":  23000000.00, "min": 23000000.00 },
-      "Bonus":    { "count":  1, "sum":  37000000.00, "min": 37000000.00 },
-      "Insentif": { "count":  1, "sum":   7000000.00, "min":  7000000.00 },
-      "Lainnya":  { "count": 83, "sum":  72000000.00, "min":    10000.00 }
+      "Bonus":    { "count":  2, "sum":  44000000.00, "min":  7000000.00 },
+      "Insentif": { "count":  2, "sum":  21000000.00, "min": 10000000.00 },
+      "Lainnya":  { "count": 81, "sum":  50000000.00, "min":    10000.00 }
     }
   }
 }
@@ -700,11 +700,11 @@ Year-level totals returned by `/extract-batch`:
 
 | Category | Count | Year sum (Rp) | Min single tx (Rp) | What it caught |
 |---|---:|---:|---:|---|
-| **Gaji**     | 12 | 120,000,000 |  9,500,000 | All 12 monthly `SAP-DD TRANSACTION` payroll deposits — recognised purely from cross-month recurrence (no salary keyword in descriptions) |
-| **THR**      | 1  |  23,000,000 | 23,000,000 | 1× `THR_Islam_2026` (religious-holiday allowance) |
-| **Bonus**    | 1  |  37,000,000 | 37,000,000 | 1× `BONUS_POOL_2025_1` (annual / structured) |
-| **Insentif** | 1  |   7,000,000 |  7,000,000 | 1× `BONUS_INTERIM_2025` (performance-triggered, distinct from annual Bonus) |
-| Lainnya      | 83 |  72,000,000 |     10,000 | P2P transfers, refunds, ECUTI leave allowances, etc. |
+| **Gaji**     | 12 | 120,000,000 |  9,500,000 | All 12 monthly `SAP-DD TRANSACTION` payroll deposits — recognised purely from cross-month recurrence (rule 5) |
+| **THR**      | 1  |  23,000,000 | 23,000,000 | 1× `THR_Islam_2026` (rule 3) |
+| **Bonus**    | 2  |  44,000,000 |  7,000,000 | 1× `BONUS_POOL_2025_1`, 1× `BONUS_INTERIM_2025` — all `BONUS_*` labels classify as Bonus (rule 1) |
+| **Insentif** | 2  |  21,000,000 | 10,000,000 | 2× `ECUTI` extra-leave payouts (rule 2 — performance-tied) |
+| Lainnya      | 81 |  50,000,000 |     10,000 | P2P transfers, refunds, etc. |
 
 The same LLM call against per-month-isolated credits produced **zero** Gaji classifications. Cross-month context turned 0 → 12 with confidence 0.95 — the most concrete validation possible that the batch endpoint solves a real problem.
 
@@ -840,7 +840,7 @@ The pattern is: validate inputs → call into `pipeline` → translate exception
 | v0.3 | 2026-05-31 | Added BRI BritAma parser, per-bank dispatch, parser subpackage; validated against 12 real BRI months. Surfaced cross-month classification gap. |
 | v0.4 | 2026-05-31 | Added `/extract-batch` endpoint, `classify_credits_batch`, cross-month-aware prompt, year-level `category_totals` rollup. Resolved cross-month gap (0 → 12 Gaji detections). Refactored error model: `InvalidPdfError` wraps `pypdfium2.PdfiumError`; clean 422 vs 500 split with calibrated log severity. |
 | v0.5 | 2026-06-01 | Several themes, broken out below. |
-| **v0.6** | 2026-06-01 | **Breaking** — category schema expanded from 4 to 5 categories with clearer semantics: `Gaji` (fixed monthly salary), `THR` (Tunjangan Hari Raya — religious-holiday allowance), `Bonus` (annual / structured), `Insentif` (performance-triggered), `Lainnya` (other). The old `Tunjangan` catch-all is gone — its members redistribute into THR (religious-holiday) or Lainnya (generic monthly perks, ECUTI leave). `BONUS_INTERIM`-style performance pay now maps to `Insentif`; `BONUS_POOL`-style annual pay stays `Bonus`. `CategoryTotal` gains a `min` field (smallest single-tx amount per category; `null` when empty). The `/upload` page renders the min stat in each category's summary row and adds a cyan colour for the Insentif accordion. Both single-PDF and batch prompts rewritten to teach the LLM the new five-way distinction. |
+| **v0.6** | 2026-06-01 | **Breaking** — category schema expanded from 4 to 5 categories: `Gaji` (fixed monthly salary), `THR` (Tunjangan Hari Raya — religious-holiday allowance), `Bonus` (any `BONUS_*` label, whether annual or interim), `Insentif` (performance-tied: `INSENTIF`/`INCENTIVE`/`KOMISI`/`COMMISSION`/`ECUTI`), `Lainnya` (other). The old `Tunjangan` catch-all is gone. Both single-PDF and batch prompts rewritten as **explicit label-first decision rules applied in order** — rule 1 routes every `BONUS_*` description to `Bonus` (so `BONUS_INTERIM` and `BONUS_POOL` both classify as `Bonus`), rule 2 routes every `ECUTI` to `Insentif`. Each LLM-returned reason now cites the rule number that fired (e.g. *"BONUS_INTERIM label → Bonus per rule 1"*), making decisions auditable. `CategoryTotal` gains a `min` field (smallest single-tx amount per category; `null` when empty). The `/upload` page renders the min stat in each category's summary row and adds a cyan colour for the Insentif accordion. |
 
 **v0.5 in detail:**
 

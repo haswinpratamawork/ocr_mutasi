@@ -29,36 +29,44 @@ SYSTEM_PROMPT = """You classify INCOMING credit rows from an Indonesian bank \
 statement (BCA, BRI, or Mandiri) into one of five categories.
 
 You see ONLY ONE statement's credits at a time, so you cannot verify monthly \
-recurrence. Rely on explicit labels and amount/source plausibility.
+recurrence. The classification is mostly driven by an explicit label in the \
+description (Indonesian corporate payroll systems use very specific tokens). \
+Match labels first, fall back to amount/source heuristics second.
 
-- "Gaji"     — fixed monthly salary / payroll deposit. The amount is the \
-same every month and arrives on/near the same day. Common payroll-system \
-labels in Indonesian statements: GAJI, PAYROLL, SALARY, KR OTOMATIS GAJI, \
-"TRSF GAJI", SAP-DD (SAP Direct Deposit — widely used for corporate payroll), \
-PAYROLL-DEPOSIT, SALARY-CRDT. A row whose description clearly carries one of \
-these labels should be classified Gaji even with no other context.
-- "THR"      — Tunjangan Hari Raya, a religious-holiday allowance paid one \
-or two times a year (around Idul Fitri / Lebaran, or Christmas). Labels: \
-THR, THR_Islam, THR_Idulfitri, THR_Lebaran, HARI RAYA, TUNJANGAN HARI RAYA. \
-Typically larger than monthly Gaji.
-- "Bonus"    — annual extra payment, usually paid once per year. Labels: \
-BONUS, BONUS_TAHUNAN, BONUS_POOL, BONUS_YEARLY, ANNUAL_BONUS, year-end-bonus \
-descriptors. Structured / scheduled rather than performance-triggered.
-- "Insentif" — performance-based extra payment whose amount varies with \
-individual or team results. Labels: INSENTIF, INCENTIVE, KOMISI, COMMISSION, \
-BONUS_INTERIM (interim performance), PERFORMANCE_BONUS, COMMISSION_PAY. \
-Often quarterly or tied to sales periods.
-- "Lainnya"  — anything else: peer-to-peer transfers (Transfer Dari …, BIF \
-TRANSFER DR from a person's name), refunds, interest, sale proceeds, \
-self-transfers, reimbursements, leave allowances such as ECUTI, and generic \
-monthly tunjangan (transport / health / pulsa) that don't match the four \
-specific categories above.
+## Label-first decision rules (apply IN ORDER, first match wins)
 
-The user sends a JSON array of credit rows. Return strict JSON matching the \
-schema. For each row include a short reason (≤25 words). Prefer Lainnya only \
-when the row is genuinely generic — do NOT downgrade an explicit \
-Gaji/THR/Bonus/Insentif label to Lainnya just because you cannot see \
-cross-month recurrence."""
+1. **Any description containing `BONUS_…` or `BONUS ` → "Bonus"** — \
+INCLUDING `BONUS_INTERIM` (interim bonus), `BONUS_POOL`, `BONUS_TAHUNAN`, \
+`BONUS_YEARLY`, `ANNUAL_BONUS`, year-end bonus descriptors. The `BONUS_` \
+naming is the company's own bonus-program prefix; whether it's annual or \
+interim doesn't matter — it's still Bonus. **DO NOT classify a `BONUS_*` \
+label as Insentif.**
+
+2. **Any description containing `ECUTI`, `INSENTIF`, `INCENTIVE`, `KOMISI`, \
+or `COMMISSION` → "Insentif"** — these are performance-tied extra payments. \
+`ECUTI` (extra cuti / extra-leave payout) is a performance/seniority-based \
+allowance and belongs here, NOT in Lainnya.
+
+3. **Any description containing `THR`, `HARI RAYA`, or `TUNJANGAN HARI RAYA` \
+→ "THR"** — Tunjangan Hari Raya, religious-holiday allowance. Examples: \
+`THR_Islam`, `THR_Idulfitri`, `THR_Lebaran`. Usually larger than Gaji.
+
+4. **Any description containing `GAJI`, `PAYROLL`, `SALARY`, `KR OTOMATIS`, \
+`SAP-DD`, `TRSF GAJI`, `PAYROLL-DEPOSIT`, or `SALARY-CRDT` → "Gaji"** — \
+explicit payroll-system labels. SAP-DD = SAP Direct Deposit, widely used by \
+corporates for monthly payroll.
+
+5. **Otherwise → "Lainnya"** — peer-to-peer transfers (`Transfer Dari <name>`, \
+`BIF TRANSFER DR <name>`), refunds, interest, sale proceeds, self-transfers, \
+reimbursements, generic monthly tunjangan (transport / kesehatan / pulsa) \
+that lack any of the labels in rules 1–4.
+
+## Output
+
+Return strict JSON matching the schema. For each row include a short reason \
+(≤25 words) that NAMES the label that drove your decision (e.g. \
+"Contains BONUS_INTERIM label → Bonus per rule 1"). \
+Do NOT downgrade an explicit Gaji/THR/Bonus/Insentif label to Lainnya."""
 
 
 _RESPONSE_SCHEMA = {
@@ -147,46 +155,51 @@ def classify_credits(credits: list[Transaction]) -> tuple[list[ClassifiedCredit]
 
 BATCH_SYSTEM_PROMPT = """You classify INCOMING credit rows from Indonesian bank \
 statements (BCA, BRI, Mandiri). You see credits from MULTIPLE monthly \
-statements at once, so you can detect recurring patterns across months — \
-which is the strongest signal for distinguishing salary from one-off transfers.
+statements at once, so you can detect recurring patterns across months. \
+Classification is driven by an explicit label in the description first, with \
+cross-month recurrence as a back-up signal for un-labelled rows.
 
-Five categories:
+## Label-first decision rules (apply IN ORDER, first match wins)
 
-- "Gaji"     — fixed monthly salary / payroll deposit. STRONGEST SIGNAL: \
-the same (or very similar) amount appears in MULTIPLE different months at \
-roughly the same day-of-month, from the same source/system. Common payroll \
-labels in Indonesian statements: GAJI, PAYROLL, SALARY, KR OTOMATIS, SAP-DD, \
-"TRSF GAJI", PAYROLL-DEPOSIT. **Recurrence beats keywords:** a deposit that \
-recurs monthly with similar amount and timing IS Gaji even if the description \
-is opaque.
-- "THR"      — Tunjangan Hari Raya, religious-holiday allowance paid one or \
-two times per year (Idul Fitri / Lebaran, sometimes Christmas). Labels: THR, \
-THR_Islam, THR_Idulfitri, THR_Lebaran, HARI RAYA, TUNJANGAN HARI RAYA. \
-Typically larger than monthly Gaji and lands in a specific month each year.
-- "Bonus"    — annual extra payment, usually once per year (year-end or \
-similar). Labels: BONUS, BONUS_TAHUNAN, BONUS_POOL, BONUS_YEARLY, \
-ANNUAL_BONUS. Scheduled / structured rather than triggered by performance.
-- "Insentif" — performance-based extra payment, variable amount based on \
-individual or team performance. Labels: INSENTIF, INCENTIVE, KOMISI, \
-COMMISSION, BONUS_INTERIM (interim/performance), PERFORMANCE_BONUS, \
-COMMISSION_PAY. Often quarterly or tied to sales periods.
-- "Lainnya"  — anything else: peer-to-peer transfers, refunds, interest, \
-sale proceeds, reimbursements, self-transfers, leave allowances (ECUTI), \
-generic monthly tunjangan (transport / health / pulsa) that don't match the \
-four specific categories above.
+1. **Any description containing `BONUS_…` or `BONUS ` → "Bonus"** — \
+INCLUDING `BONUS_INTERIM` (interim bonus), `BONUS_POOL`, `BONUS_TAHUNAN`, \
+`BONUS_YEARLY`, `ANNUAL_BONUS`. The `BONUS_` prefix is the company's own \
+bonus-program naming and ALL such rows are Bonus regardless of whether \
+they're annual, interim, mid-year, or quarterly. **DO NOT split BONUS_INTERIM \
+into Insentif.**
 
-Disambiguation tips:
-- BONUS_POOL / BONUS_TAHUNAN → Bonus (annual / structured).
-- BONUS_INTERIM / COMMISSION → Insentif (performance / variable).
-- THR_* / HARI RAYA → THR (religious-holiday timing).
-- ECUTI / TUNJANGAN TRANSPORT / monthly perks → Lainnya (don't fit the \
-specific four).
+2. **Any description containing `ECUTI`, `INSENTIF`, `INCENTIVE`, `KOMISI`, \
+or `COMMISSION` → "Insentif"** — these are performance-tied extra payments. \
+`ECUTI` (extra cuti / extra-leave payout) belongs here, NOT in Lainnya — \
+it's a performance/seniority-based allowance in Indonesian corporate practice.
 
-The user sends a JSON array. Each item has: id (int), source_file (the PDF \
-this row came from), tanggal (ISO date), amount, keterangan (description). \
-Return strict JSON with one classification per id. Reason ≤25 words. \
-Be conservative on Gaji UNLESS recurrence is clear; prefer Lainnya when \
-truly uncertain."""
+3. **Any description containing `THR`, `HARI RAYA`, or `TUNJANGAN HARI RAYA` \
+→ "THR"** — Tunjangan Hari Raya, religious-holiday allowance. Examples: \
+`THR_Islam`, `THR_Idulfitri`, `THR_Lebaran`.
+
+4. **Any description containing `GAJI`, `PAYROLL`, `SALARY`, `KR OTOMATIS`, \
+`SAP-DD`, `TRSF GAJI`, `PAYROLL-DEPOSIT`, `SALARY-CRDT` → "Gaji"** — explicit \
+payroll-system labels. SAP-DD = SAP Direct Deposit, widely used for monthly \
+payroll.
+
+5. **No label match? Use cross-month recurrence.** Same (or very similar) \
+amount, same day-of-month, same source, appearing across MULTIPLE months → \
+"Gaji" (this is the recurring-monthly-deposit signal you can verify because \
+you see all months at once).
+
+6. **Otherwise → "Lainnya"** — peer-to-peer transfers (`Transfer Dari <name>`, \
+`BIF TRANSFER DR <name>`), refunds, interest, sale proceeds, reimbursements, \
+self-transfers, generic monthly tunjangan (transport / kesehatan / pulsa) \
+without any of the labels above.
+
+## Output
+
+The user sends a JSON array. Each item has: id (int), source_file (PDF this \
+row came from), tanggal (ISO date), amount, keterangan (description). Return \
+strict JSON with one classification per id. Reason ≤25 words — name the label \
+or pattern that drove the decision (e.g. "BONUS_INTERIM label → Bonus per \
+rule 1" or "Recurring monthly SAP-DD → Gaji per rule 5"). Do NOT downgrade \
+an explicit Gaji/THR/Bonus/Insentif label to Lainnya."""
 
 
 def classify_credits_batch(
