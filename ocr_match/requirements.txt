@@ -1,0 +1,15 @@
+# Web framework
+fastapi>=0.115,<1
+uvicorn[standard]>=0.32,<1
+python-multipart>=0.0.20,<1
+
+# Upstream HTTP (talks to ocr_slip and ocr_mutasi)
+httpx>=0.27,<1
+
+# LLM client (Azure OpenAI uses the openai SDK)
+openai>=1.55,<2
+
+# Settings / models
+pydantic>=2.9,<3
+pydantic-settings>=2.6,<3
+python-dotenv>=1.0,<2

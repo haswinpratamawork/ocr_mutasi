@@ -1,0 +1,25 @@
+# Secrets
+.env
+.env.local
+*.local
+
+# Virtualenv
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output / scratch
+out/
+tmp/
+*.log

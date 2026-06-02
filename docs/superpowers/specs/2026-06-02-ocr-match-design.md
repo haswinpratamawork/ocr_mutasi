@@ -13,7 +13,7 @@ This spec describes a standalone third service that pairs **salary slips** (pars
 
 ### Goals
 - Given **N salary-slip PDFs** and **M bank-statement PDFs** for the same person, produce a structured list of slip → bank-credit pairs.
-- Handle fuzzy clinic-name mapping that pure heuristics can't (e.g. slip filename `Slip Gaji Alsut …` ↔ bank credit `FEE DOKTER | OSG ALAM SUTERA PT`).
+- Handle fuzzy clinic-name mapping that pure heuristics can't (e.g. slip filename `Slip Gaji Alsut …` ↔ bank credit `FEE DOKTER | KLINIK CONTOH PT`).
 - Surface **unmatched slips** (employer says they paid, no bank record found) and **unmatched Gaji credits** (bank shows income, no slip uploaded) so the user can see both gaps.
 - Reuse the existing services unchanged: `ocr_match` calls `ocr_slip` and `ocr_mutasi` over HTTP, never reaches into their internals.
 - Same operational shape as the other two services: FastAPI app, isolated venv, an `/upload` HTML page for browser testing.
@@ -90,7 +90,7 @@ All public response types are Pydantic so they double as FastAPI response schema
 
 ```python
 class ParsedSlip(BaseModel):
-    source_file: str                # e.g. "Slip Gaji Alsut drg. Isyana Ginarsi - Feb 2025.pdf"
+    source_file: str                # e.g. "Slip Gaji Alsut drg. <NAME> - Feb 2025.pdf"
     worker_name: str | None
     institution_name: str | None
     total_paid: float | None
@@ -361,7 +361,7 @@ Assert:
 
 ### 11.3 What the smoke test does NOT assert
 
-It does not assert which **specific** credit pairs with the Bintaro slip — that's a judgement call between two plausible candidates (PT OSG JAKARTA TIM vs KASTARA ANANTA BSD). The test asserts the matcher made *a* sensible choice with valid hard-rule compliance, not the specific choice. Whether the LLM lands on JAKARTA TIM or KASTARA BSD for "Bintaro" is documented as an Open Question for v2 — the user may want to add a hand-curated synonym table.
+It does not assert which **specific** credit pairs with the Bintaro slip — that's a judgement call between two plausible candidates (PT KLINIK CONTOH JAKARTA vs KLINIK CONTOH BSD). The test asserts the matcher made *a* sensible choice with valid hard-rule compliance, not the specific choice. Whether the LLM lands on JAKARTA TIM or KASTARA BSD for "Bintaro" is documented as an Open Question for v2 — the user may want to add a hand-curated synonym table.
 
 ---
 
