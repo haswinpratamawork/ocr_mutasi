@@ -2,7 +2,7 @@
 
 > Backend service that extracts transactions from Indonesian bank-statement PDFs and uses an LLM to classify each *credit* transaction as **Gaji** (fixed monthly salary), **THR** (religious-holiday allowance), **Bonus** (any `BONUS_*` label, annual or interim), **Insentif** (performance pay and work-related `TUNJANGAN <kind>` allowances), or **Lainnya** (other).
 
-**Current version:** v0.7 — three supported banks, 5-category classifier (Gaji / THR / Bonus / Insentif / Lainnya), batch endpoint with cross-month classification, in-browser upload page, per-category `min` stat. v0.7 adds `SMEMFTS` / `LLG` as recognised payroll channels and bumps the default LLM timeout to 120 s for large batches. See the change log in [architecture.md §19](docs/architecture.md#19-change-log).
+**Current version:** v0.8 — three supported banks, 5-category classifier (Gaji / THR / Bonus / Insentif / Lainnya), batch endpoint with cross-month classification, in-browser upload page, per-category `min` stat. v0.8 adds professional-fee detection (`FEE DOKTER`, `FEE DRG`, `HONOR`, `HONORARIUM`, `JASA`, `RETAINER` + corporate sender → Gaji), plus a hard exclusion list (`CASHBACK`, `REFUND`, `BUNGA`, `PROMO` → always Lainnya). See the change log in [architecture.md §19](docs/architecture.md#19-change-log).
 
 **Supported banks** (auto-detected from page 1 — no client flag needed):
 - **BCA "Rekening Tahapan"** — 5-column layout, `DB` suffix marks debits.
@@ -79,9 +79,12 @@ The LLM follows these six rules verbatim from the system prompt. Each row's `rea
 1. Description contains `BONUS_…` or `BONUS ` → **Bonus**
 2. Description contains `THR` / `HARI RAYA` / `TUNJANGAN HARI RAYA` → **THR** *(must run before rule 3 so the generic-tunjangan catchall doesn't swallow it)*
 3. Description contains `ECUTI` / `INSENTIF` / `INCENTIVE` / `KOMISI` / `COMMISSION`, **or** any `TUNJANGAN <kind>` other than Hari Raya (transport, makan, pulsa, keluar kota, kesehatan, …), **or** `LLG-DEUTSCHE BANK` / any `LLG ` prefix (Lalu Lintas Giro — BI bulk-clearing channel used for allowance disbursement) → **Insentif**. *Because this rule fires before rule 4, a mixed label like `KR OTOMATIS LLG-DEUTSCHE BANK | PT <X>` resolves to Insentif, not Gaji.*
-4. Description contains an explicit payroll-disbursement keyword (and is not already caught by rule 3) → **Gaji**. Two flavours:
+4. Description contains an explicit payroll-disbursement keyword **and a corporate sender** (`PT <X>`, `<X> PT`, `<X> INDO`, `<X> BSD`, `KASTARA <X>`, …) → **Gaji**. Three flavours:
    - employer-facing labels: `GAJI` / `PAYROLL` / `SALARY` / `TRSF GAJI` / `PAYROLL-DEPOSIT` / `SALARY-CRDT`
    - Indonesian bank bulk-payroll product labels: `SAP-DD` (SAP Direct Deposit), `KR OTOMATIS` (BCA auto-credit *when NOT accompanied by an `LLG` label*), `SMEMFTS` (BCA SME Mass Funds Transfer Service — the primary salary channel)
+   - **Professional-fee / honorarium labels** *(new in v0.8)* — payment FOR work done where the description names the kind of work: `FEE DOKTER`, `FEE DRG`, `FEE NOTARIS`, `FEE KONSULTAN`, `FEE [profession]`, `HONOR`, `HONORARIUM`, `JASA <name>`, `RETAINER`. Example matches: `TRSF E-BANKING CR <ref> | FEE DOKTER | PT KLINIK CONTOH JAKARTA` → Gaji.
+
+   **Hard exclusion for rule 4 (overrides any match above):** descriptions containing `CASHBACK`, `REFUND`, `REIMBURSE`, `BUNGA` (bank interest), `TAX REFUND`, or `PROMO` always go to Lainnya — these are merchant/bank disbursements, not employer payments, even when the apparent "sender" looks corporate (e.g. `KR OTOMATIS TRF KOLEKTIF | CASHBACK QRIS BCA | DI MERCHANT XYZ` → Lainnya).
 5. *(Batch endpoint only)* No label match, but **the same corporate sender** (`PT <X>`, `<X> INDO`, …) appears in **multiple uploaded months** → **Gaji**. Sender consistency is the cross-month signal — real salaries vary in amount month-to-month (overtime, deductions, prorated months, bundled THR/bonus), so amount equality is NOT required.
 6. Otherwise → **Lainnya**
 

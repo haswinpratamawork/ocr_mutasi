@@ -69,23 +69,36 @@ mixed labels.
    These are work-tied perks paid alongside Gaji — they belong in Insentif, \
 NOT in Lainnya.
 
-4. **Any description containing one of the following payroll-disbursement \
-labels → "Gaji"**:
-   - employer-facing labels: `GAJI`, `PAYROLL`, `SALARY`, `TRSF GAJI`, \
-`PAYROLL-DEPOSIT`, `SALARY-CRDT`;
-   - Indonesian bank bulk-payroll product labels: `SAP-DD` (SAP Direct \
-Deposit), `KR OTOMATIS` (BCA auto-credit, when NOT accompanied by an `LLG` \
-label — rule 3 catches the LLG case first), `SMEMFTS` (BCA SME Mass Funds \
-Transfer Service — the primary salary channel).
+4. **Gaji — three flavours, all requiring a CORPORATE SENDER** (e.g. `PT \
+<X>`, `<X> PT`, `<X> INDO`, `<X> JAKARTA`, `<X> BSD`, `<X> ALAM SUTERA`, \
+`<X> TBK`, `CV <X>`, `KASTARA <X>`, etc. — a registered-company-style name, \
+NOT a personal name like `BUDI SANTOSO` or `DRG.JOKO HARTONO`):
+   (a) **Employer-facing payroll labels** in the description: `GAJI`, \
+`PAYROLL`, `SALARY`, `TRSF GAJI`, `PAYROLL-DEPOSIT`, `SALARY-CRDT`.
+   (b) **Bank bulk-payroll product labels**: `SAP-DD` (SAP Direct Deposit), \
+`KR OTOMATIS` (BCA auto-credit, when NOT accompanied by an `LLG` label — \
+rule 3 catches the LLG case first), `SMEMFTS` (BCA SME Mass Funds Transfer \
+Service — the primary salary channel).
+   (c) **Professional-fee / honorarium labels** — payment FOR work done, \
+where the description names the kind of work and the sender is a company: \
+`FEE DOKTER`, `FEE DRG` (Dokter Gigi), `FEE NOTARIS`, `FEE INSINYUR`, \
+`FEE KONSULTAN`, `FEE PENGACARA`, `FEE [profession]`, `HONOR`, \
+`HONORARIUM`, `JASA <name>`, `RETAINER`. Example matches from real data: \
+`TRSF E-BANKING CR <ref> | FEE DOKTER | PT KLINIK CONTOH JAKARTA` → **Gaji**, \
+`TRSF E-BANKING CR <ref> | FEE DRG JOKO | KLINIK CONTOH BSD` → **Gaji**.
 
-   When one of these labels appears together with a corporate sender name \
-(e.g. `PT TUV RHEINLAND`, `TUV RHEINLAND INDO`, or any `PT <X>` / `<X> INDO`), \
-it's almost certainly Gaji — DO NOT downgrade it to Lainnya.
+   **Hard exclusion for rule 4 (overrides any match above):** if the \
+description contains `CASHBACK`, `REFUND`, `REIMBURSE`, `REIMBURSEMENT`, \
+`BUNGA` (bank interest), `TAX REFUND`, or `PROMO`, treat as Lainnya — these \
+are merchant/bank disbursements, not employer payments, even if the apparent \
+"sender" happens to look corporate (e.g. `KR OTOMATIS TRF KOLEKTIF \| \
+CASHBACK QRIS BCA \| DI MERCHANT XYZ` is Lainnya, not Gaji).
 
 5. **Otherwise → "Lainnya"** — peer-to-peer transfers from a person's name \
-(`Transfer Dari <name>`, `BIF TRANSFER DR <name>`), refunds, interest, sale \
-proceeds, self-transfers, reimbursements, anything that lacks the labels in \
-rules 1–4.
+(`Transfer Dari <name>`, `BIF TRANSFER DR <name>`, or any clearly-personal \
+sender like `BUDI SANTOSO`, `DRG.JOKO HARTONO`, `JONI WIJAYA`), refunds, \
+interest (`BUNGA`), sale proceeds, self-transfers, reimbursements, debt \
+repayments (Indonesian `hutang`), anything that lacks the labels in rules 1–4.
 
 ## Output
 
@@ -223,31 +236,49 @@ mixed labels.
    These are work-tied perks paid alongside Gaji — they belong in Insentif, \
 NOT in Lainnya.
 
-4. **Any description containing one of the following payroll-disbursement \
-labels → "Gaji"**:
-   - employer-facing labels: `GAJI`, `PAYROLL`, `SALARY`, `TRSF GAJI`, \
-`PAYROLL-DEPOSIT`, `SALARY-CRDT`;
-   - Indonesian bank bulk-payroll product labels: `SAP-DD` (SAP Direct \
-Deposit), `KR OTOMATIS` (BCA auto-credit, when NOT accompanied by an `LLG` \
-label — rule 3 catches the LLG case first), `SMEMFTS` (BCA SME Mass Funds \
-Transfer Service — the primary salary channel).
+4. **Gaji — three flavours, all requiring a CORPORATE SENDER** (`PT <X>`, \
+`<X> PT`, `<X> INDO`, `<X> JAKARTA`, `<X> BSD`, `<X> ALAM SUTERA`, \
+`<X> TBK`, `CV <X>`, `KASTARA <X>`, etc. — a registered-company-style name, \
+NOT a personal name):
+   (a) **Employer-facing payroll labels**: `GAJI`, `PAYROLL`, `SALARY`, \
+`TRSF GAJI`, `PAYROLL-DEPOSIT`, `SALARY-CRDT`.
+   (b) **Bank bulk-payroll product labels**: `SAP-DD`, `KR OTOMATIS` (when \
+no `LLG` is present — rule 3 catches the LLG case first), `SMEMFTS` (BCA \
+SME Mass Funds Transfer Service — the primary salary channel).
+   (c) **Professional-fee / honorarium labels** — payment FOR work done, \
+where the description names the kind of work and the sender is a company: \
+`FEE DOKTER`, `FEE DRG`, `FEE NOTARIS`, `FEE INSINYUR`, `FEE KONSULTAN`, \
+`FEE PENGACARA`, `FEE [profession]`, `HONOR`, `HONORARIUM`, `JASA <name>`, \
+`RETAINER`. Example matches: `TRSF E-BANKING CR <ref> \| FEE DOKTER \| PT \
+OSG JAKARTA TIM` → **Gaji**; `TRSF E-BANKING CR <ref> \| FEE DRG JOKO \| \
+KLINIK CONTOH BSD` → **Gaji**.
+
+   **Hard exclusion for rule 4 (overrides any match above):** if the \
+description contains `CASHBACK`, `REFUND`, `REIMBURSE`, `REIMBURSEMENT`, \
+`BUNGA` (bank interest), `TAX REFUND`, or `PROMO`, classify as Lainnya \
+regardless of any other keyword — these are merchant/bank disbursements, \
+not employer payments, even when the apparent "sender" looks corporate.
 
    When one of these labels appears together with a corporate sender name \
 (e.g. `PT TUV RHEINLAND`, `TUV RHEINLAND INDO`, or any `PT <X>` / `<X> INDO`), \
 it's almost certainly Gaji — DO NOT downgrade it to Lainnya.
 
 5. **No label match? Use cross-month recurrence.** The strongest cross-month \
-salary signal is **the same SENDER appearing across multiple months**, not \
-amount equality. Real salaries vary monthly due to overtime, deductions, \
-prorated months, raises, or bundled THR/bonus. A credit whose description \
-names the SAME corporate employer (e.g. `PT TUV RHEINLAND` / `TUV RHEINLAND \
-INDO`) and that you can see in ≥ 3 different months → "Gaji", even if amounts \
-range widely (e.g. 400K, 11M, 47M). Day-of-month consistency is a weaker \
-secondary hint.
+salary signal is **the same CORPORATE SENDER appearing across multiple \
+months**, not amount equality. Real salaries vary monthly due to overtime, \
+deductions, prorated months, raises, or bundled THR/bonus. A credit whose \
+description names the SAME corporate sender (`PT <X>`, `<X> INDO`, `<X> PT`, \
+`KASTARA <X>`, etc.) and that you can see in ≥ 2 different months → \
+"Gaji", even if amounts range widely (e.g. 400K, 11M, 47M; or 5.9M, 6.3M, \
+5.8M for monthly professional fees). Day-of-month consistency is a weaker \
+secondary hint. The same hard exclusion as rule 4 applies: `CASHBACK`, \
+`REFUND`, `BUNGA`, `PROMO` → Lainnya, even with recurrence.
 
-6. **Otherwise → "Lainnya"** — peer-to-peer transfers (`Transfer Dari <name>`, \
-`BIF TRANSFER DR <name>`), refunds, interest, sale proceeds, reimbursements, \
-self-transfers, anything without any of the labels above.
+6. **Otherwise → "Lainnya"** — peer-to-peer transfers (`Transfer Dari \
+<name>`, `BIF TRANSFER DR <name>`, or any clearly-personal sender like \
+`BUDI SANTOSO`, `DRG.JOKO HARTONO`), refunds, interest (`BUNGA`), sale \
+proceeds, reimbursements, self-transfers, debt repayments (Indonesian \
+`hutang`), anything without any of the labels above.
 
 ## Output
 

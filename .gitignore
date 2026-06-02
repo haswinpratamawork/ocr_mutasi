@@ -108,3 +108,6 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+
+# Unrelated sibling project (its own git repo)
+salary-slip-parser-api/
