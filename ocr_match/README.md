@@ -50,37 +50,37 @@ curl -X POST \
 
 ```
 POST /api/v1/match
-   ├── slips      → forwarded to ocr_slip:/parse        → ParsedSlip[]
-   ├── mutations  → forwarded to ocr_mutasi:/…/extract-batch → BatchClassifiedCredit[]
-   ↓                                                    (kept only where category == "Gaji")
-Each item is tagged with month = "YYYY-MM"
-   ↓ (slip month from filename; credit month from tanggal)
-Group by month → { "2025-02": (slips, gaji_credits), ... }
-   ↓
-For each month bucket  →  one Azure OpenAI call (gpt-4.1-mini)
-   ↓                       (structured JSON output, temperature=0)
-Server enforces hard rules before accepting a pair:
-   ─ rule 1: months must match
-   ─ rule 2: |credit − slip| / slip ≤ MATCH_AMOUNT_TOLERANCE_PCT  (default 15%)
-   ─ rule 3: each credit assigned to at most ONE slip
+   ├── slips      → forwarded to ocr_slip:/parse                → ParsedSlip[]
+   ├── mutations  → forwarded to ocr_mutasi:/…/extract-batch    → BatchClassifiedCredit[]
+   ↓                                                            (kept only where category == "Gaji")
+Each item tagged with month = "YYYY-MM"
+   ↓                                  (slip month from filename; credit month from tanggal)
+Deterministic matcher (no LLM):
+   for each slip with a known total_paid:
+     try month X+1 first  (the common Indonesian payroll-lag pattern)
+     fall back to month X (same-month payment)
+       → first unused credit whose amount equals slip.total_paid
+         (within MATCH_AMOUNT_TOLERANCE_RP, default Rp 1) wins
    ↓
 Assemble MatchResponse: matches[] + unmatched_slips[] + unmatched_credits[] + audit
 ```
 
-### Decision rules in the LLM prompt
+### Why the X+1 payroll-lag pattern matters
 
-**Hard (server-side enforced):** same month • amount within ±15% • one-credit-per-slip.
+In Indonesian payroll convention, a **March slip is typically paid and shown in the bank statement in April**. Not always — sometimes pay date is in the same month. The matcher tries the `X+1` bucket first, then falls back to `X`. Each matched pair records which one fired in `match_pattern`:
 
-**Soft (LLM-only — used to break ties between equally valid candidates):**
-- `Alsut` ≡ `Alam Sutera`
-- `Bintaro` → often `BSD` (Bumi Serpong Damai)
-- `Jaktim` ≡ `Jakarta Timur`, `Jakbar` ≡ `Jakarta Barat`, …
-- `PT <X>` ≡ `<X> PT` (word order irrelevant)
-- Slip filename hints (`Slip Gaji Alsut …`)
-- Smaller `|amount_diff_pct|` wins ties
-- `FEE DOKTER` / `FEE DRG` / `HONOR` / `HONORARIUM` in the credit description + corporate sender → strong evidence
+| `match_pattern` | Meaning |
+|---|---|
+| `"next_month"` | Slip for month X, credit lands in month X+1 (the common case) |
+| `"same_month"` | Slip for month X, credit lands in month X (fallback) |
 
-The LLM may propose hard-rule-violating pairs (it has been observed admitting "amount too high but no other credit fits better"). The matcher silently rejects those and the slip falls into `unmatched_slips`. A log line at INFO level records each rejection for audit.
+The UI shows this as a small **`X+1`** or **`same month`** badge on each matched-pair card.
+
+### Why no LLM
+
+The user's actual payroll-vs-bank amounts agree **to the rupiah** for every genuine pair (`diff = Rp 0`, observed across all 4 real matches in the included sample). When the truth is that exact, a fuzzy matcher is the wrong tool — it admits noise, costs money, and adds latency. The matcher is now O(N+M) deterministic logic, runs in microseconds, and never needs an Azure round-trip.
+
+The `LLM_REQUEST_TIMEOUT_S` config knob is kept for a possible future tie-break path (when ≥ 2 candidate credits have identical amounts and need fuzzy clinic-name disambiguation), but isn't called in v0.2.
 
 ---
 
@@ -116,11 +116,12 @@ The LLM may propose hard-rule-violating pairs (it has been observed admitting "a
     {
       "slip":   { /* full ParsedSlip from ocr_slip */ },
       "credit": { /* full GajiCredit from ocr_mutasi */ },
-      "confidence": 0.95,
-      "reason": "Month match, amount within 15%, institution Alsut ≡ Alam Sutera",
-      "amount_diff_rp": -366600,           // signed: credit.amount - slip.total_paid
-      "amount_diff_pct": -0.058,
-      "days_off": 23                       // |credit_day - 28|, rough month-end ref
+      "confidence": 1.0,                   // deterministic exact-match is always 1.0
+      "reason": "Exact-amount match (diff Rp +0); slip month 2025-02 → credit month 2025-03 (X+1 payroll-lag pattern)",
+      "amount_diff_rp": 0,                 // signed: credit.amount - slip.total_paid
+      "amount_diff_pct": 0,
+      "days_off": 5,                       // credit's day-of-month
+      "match_pattern": "next_month"        // "next_month" (X+1) or "same_month" (X)
     }
   ],
   "unmatched_slips": [ /* slips with no acceptable credit */ ],
@@ -161,9 +162,9 @@ Loaded once at startup via `pydantic-settings`. Defaults in `config.py`; overrid
 | `OCR_MUTASI_URL` | `http://127.0.0.1:8000` | Base URL of the bank-statement parser |
 | `APP_HOST` | `0.0.0.0` | Bind address |
 | `APP_PORT` | `8200` | Bind port |
-| `LLM_REQUEST_TIMEOUT_S` | `60` | Per-month LLM call timeout |
+| `LLM_REQUEST_TIMEOUT_S` | `60` | Reserved for a future LLM tie-break path; not called in v0.2 |
 | `UPSTREAM_TIMEOUT_S` | `120` | Upstream HTTP call timeout |
-| `MATCH_AMOUNT_TOLERANCE_PCT` | `0.15` | Slip-vs-credit amount tolerance |
+| `MATCH_AMOUNT_TOLERANCE_RP` | `1` | Absolute rupiah tolerance for the exact-match rule. Default is "essentially exact, with float-safety wiggle". Bump if your real-world data has cents-rounding or fee adjustments. |
 | `MAX_FILES` | `50` | Per-upload cap across both groups combined |
 
 ---
@@ -195,9 +196,10 @@ ocr_match/
 | `ocr_slip not reachable at http://…:8100` | 503 | `ocr_slip` isn't running on the configured port | Start `ocr_slip` (see [`ocr_slip/README.md`](../ocr_slip/README.md)) or set `OCR_SLIP_URL` to where it actually runs |
 | `ocr_mutasi not reachable …` | 503 | `ocr_mutasi` isn't running | Same — start it or update `OCR_MUTASI_URL` |
 | `Upstream … returned 4xx/5xx: …` | 502 | Upstream got the request but rejected it (often: malformed PDF) | Check the `body` field in the error |
-| `audit.matcher_errors` non-empty | 200 | Azure OpenAI failed for that month | Slips and credits for that month all fall to unmatched; retry once Azure is healthy |
+| `audit.matcher_errors` non-empty | 200 | The deterministic matcher cannot error; if this appears, it's an upstream-typed error misclassified — file a bug |
 | All slips end up in `unmatched_slips` | 200 | The slip filename has no parseable month *or* there are 0 Gaji credits in the bank statement | Confirm filenames contain a month (`Feb 2025`, `April`, etc.); confirm the bank statement has classified Gaji credits via `ocr_mutasi`'s `/extract-batch` |
-| A specific slip ends up unmatched but you can see the right credit | 200 | The amount diff exceeds `MATCH_AMOUNT_TOLERANCE_PCT`; check the `ocr_match` log for `rule-2 violation rejected` | Widen the tolerance via `MATCH_AMOUNT_TOLERANCE_PCT=0.25` (or whatever fits your actual diff distribution) |
+| A specific slip ends up unmatched but you can see what looks like the right credit | 200 | Amount differs by more than `MATCH_AMOUNT_TOLERANCE_RP` | Inspect both sides. If real-world payments legitimately differ by cents (PPh withholding rounding), bump `MATCH_AMOUNT_TOLERANCE_RP` to e.g. `100` or `1000`. Don't go higher than your domain expects — large tolerances admit cross-clinic collisions. |
+| A slip for month X with no X+1 bank statement uploaded | 200 | The matcher tries `X+1` first then falls back to `X`. With only month-X uploaded and no X+1 credits, only the `same_month` pattern can fire — and only if your payroll happens to pay in the same month. | Upload the X+1 statement too, or accept that the slip is unmatched. |
 | Swagger UI shows `Add string item` instead of file pickers | n/a | Stale build — the OpenAPI 3.0.3 patch wasn't applied | Restart uvicorn |
 
 ---
@@ -219,12 +221,13 @@ ocr_match/
 
 | Metric | Result |
 |---|---|
-| Slips uploaded | 6 (Alsut/Bintaro × Feb/Mar/Apr 2025) |
+| Slips uploaded | 6 (Alsut / Bintaro × Feb / Mar / Apr 2025) |
 | Gaji credits found | 8 across the 3 months |
-| Matched within ±15% | **3** (Alsut Feb, Bintaro Feb, Alsut Mar) |
-| Unmatched slips | 3 (Bintaro Mar, Alsut Apr, Bintaro Apr — all exceed 15% diff) |
-| Unmatched credits | 5 (3 to KLINIK CONTOH BSD, no slips for that clinic in the sample) |
+| **Matched, exact-amount, X+1 pattern** | **4** (Feb-slip ↔ Mar-credit and Mar-slip ↔ Apr-credit, both clinics) |
+| **Amount diff on each match** | **Rp 0** *(every pair, both clinics, both months)* |
+| Unmatched slips | 2 (the **Apr 2025** slips, both clinics — would land in the May statement which wasn't uploaded) |
+| Unmatched credits | 4 (Feb's two Alsut/Jakarta credits — paid from Jan slips not uploaded; 2 BSD credits — clinic not in the slip set) |
 | Matcher errors | 0 |
-| Wall clock | ~25 s end-to-end (3 parallel LLM calls, one per month) |
+| Wall clock | ~14 s end-to-end (mostly upstream PDF parsing; the matcher itself is microseconds) |
 
-That `matched_count = 3 of 6` is the *honest* answer for the test data — the Apr month's slip totals genuinely diverge from the bank credits by 27–37%, which exceeds the spec's 15% rule. Either the slip totals or the credit amounts are off (or both, due to gross/net interpretations). The pair is surfaced in `unmatched_slips`, not silently force-matched, so the user can investigate.
+This is what *correct* looks like. The 2 unmatched slips and 4 unmatched credits are **legitimate signals**: Apr slips will pair with May credits (not uploaded), Feb credits paired with Jan slips (not uploaded), and the BSD clinic has no slip in this sample. No force-matches, no near-misses force-accepted, nothing pretended — the matcher honestly returns the exact set of pairs it can prove.

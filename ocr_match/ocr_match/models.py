@@ -60,7 +60,10 @@ class MatchPair(BaseModel):
     reason: str
     amount_diff_rp: float = Field(..., description="credit.amount - slip.total_paid; signed")
     amount_diff_pct: float = Field(..., description="amount_diff_rp / slip.total_paid; signed")
-    days_off: int = Field(0, description="credit date vs slip's expected month-end")
+    days_off: int = Field(0, description="day-of-month of the credit's tanggal")
+    match_pattern: str = Field(
+        ..., description="'next_month' (slip month X paid in bank month X+1) or 'same_month'"
+    )
 
 
 class MatchAudit(BaseModel):

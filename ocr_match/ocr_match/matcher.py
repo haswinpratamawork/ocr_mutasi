@@ -1,248 +1,138 @@
-"""Per-month LLM matcher.
+"""Deterministic slip ↔ credit matcher.
 
-For each month we send the LLM that month's slips and Gaji credits and ask
-it to assign each slip to at most one credit (or none). Cross-month
-combinations are by construction invalid and excluded — see spec §6.3.
+Pairing logic (no LLM — exact-amount rule + month-shift fallback):
 
-The prompt is explicit, rule-based, and modelled after ocr_mutasi's
-classifier prompt: hard rules first, soft signals second, structured-output
-JSON schema strictly enforced. Same audit story (the LLM's `reason` field
-names the rule/signal that drove its choice).
+  For each slip with a known total_paid:
+    1. Look for an unused credit whose amount equals slip.total_paid
+       (within ``MATCH_AMOUNT_TOLERANCE_RP``, default Rp 1) in month X+1
+       — where X is the slip's filename-derived month. This is the
+       common Indonesian payroll pattern: a March slip is typically paid
+       and shows up in the bank statement in April.
+    2. If no X+1 match exists, fall back to month X (same month).
+    3. The first match wins; mark that credit as used.
+
+  Each accepted pair records which pattern fired (``"next_month"`` or
+  ``"same_month"``) so downstream UIs can show it.
+
+Why no LLM?
+  - The user's source data is precise: payroll-side and bank-side amounts
+    agree to the rupiah. Fuzzy matching adds noise, not value.
+  - The pattern is determined entirely by month-shift and amount equality,
+    both of which are deterministic.
+  - Without an LLM call, the matcher is O(N+M) instead of O(months) HTTP
+    round-trips — pairing 100 slips against 12 monthly statements takes
+    microseconds.
 """
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-from typing import Optional
-
-from openai import APIError, APITimeoutError, AsyncAzureOpenAI
+from collections import defaultdict
 
 from .config import get_settings
 from .models import GajiCredit, MatchPair, ParsedSlip
 
 logger = logging.getLogger(__name__)
 
-# ----------------------------- prompt --------------------------------------
 
-SYSTEM_PROMPT = """You pair Indonesian salary slips with bank-credit rows \
-that paid them. You receive ONE month's worth at a time. Output JSON pairing \
-each slip with either ONE credit or null.
-
-## Hard rules (a pairing is invalid if any fails)
-
-1. The credit's month MUST equal the slip's month.
-2. |credit.amount − slip.total_paid| / slip.total_paid ≤ {tolerance:.2f}
-   (covers small tax/fee discrepancies; default 15%).
-3. Each credit may be assigned to AT MOST ONE slip.
-
-## Soft signals (use to disambiguate when multiple credits pass the hard rules)
-
-* Institution-name fuzzy match. Common Indonesian abbreviations:
-  - "Alsut"        ≡ "Alam Sutera"
-  - "Bintaro"      → often "BSD" (Bumi Serpong Damai, neighbouring area)
-  - "Jaktim"       ≡ "Jakarta Timur"
-  - "Jakbar"       ≡ "Jakarta Barat"
-  - "Jaksel"       ≡ "Jakarta Selatan"
-  - "Jakut"        ≡ "Jakarta Utara"
-  - "PT <X>"       ≡ "<X> PT"  (word order is irrelevant)
-* Slip filename hints (e.g. "Slip Gaji Alsut …") often name the clinic.
-* Smaller |amount_diff_pct| wins ties.
-* The credit's keterangan often contains a `FEE DOKTER` / `FEE DRG` / \
-`HONOR` / `HONORARIUM` token plus a corporate sender — match the sender \
-against the slip's institution_name and filename.
-
-## Output
-
-The user sends two JSON arrays: `slips` and `credits`. Each item has an \
-`id`. Return strict JSON: \
-`{{"pairs": [{{"slip_id": int, "credit_id": int|null, "confidence": 0..1, \
-"reason": "≤30 words"}}]}}`. Include EVERY slip in the output (use \
-credit_id=null for slips with no acceptable match). Reason must name the \
-rule and signal that drove your choice."""
+def _month_plus_one(month: str) -> str | None:
+    """``"2025-02"`` → ``"2025-03"``. Returns None if input isn't YYYY-MM."""
+    try:
+        year_s, mon_s = month.split("-")
+        year, mon = int(year_s), int(mon_s)
+    except (ValueError, AttributeError):
+        return None
+    mon += 1
+    if mon > 12:
+        mon = 1
+        year += 1
+    return f"{year:04d}-{mon:02d}"
 
 
-def _response_schema() -> dict:
-    return {
-        "name": "match_pairings",
-        "schema": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "pairs": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "slip_id": {"type": "integer"},
-                            "credit_id": {"type": ["integer", "null"]},
-                            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                            "reason": {"type": "string"},
-                        },
-                        "required": ["slip_id", "credit_id", "confidence", "reason"],
-                    },
-                }
-            },
-            "required": ["pairs"],
-        },
-        "strict": True,
-    }
+def _credit_day(credit: GajiCredit) -> int:
+    """Extract the day-of-month from an ISO ``tanggal``. 0 on parse failure."""
+    try:
+        return int(credit.tanggal.split("-")[2])
+    except (IndexError, ValueError):
+        return 0
 
 
-# ----------------------------- public entry --------------------------------
-
-async def match_month(
-    month: str,
+def match_all(
     slips: list[ParsedSlip],
     credits: list[GajiCredit],
-) -> tuple[list[MatchPair], list[ParsedSlip], list[GajiCredit], Optional[str]]:
-    """Pair this month's slips with this month's Gaji credits.
+) -> tuple[list[MatchPair], list[ParsedSlip], list[GajiCredit]]:
+    """Pair every slip against the credit list, preferring month X+1 over X.
 
     Returns:
-        (matches, unmatched_slips, unmatched_credits, error_message_or_None).
+        (matches, unmatched_slips, unmatched_credits).
 
-    The function is robust: on any LLM error every slip + credit returns as
-    unmatched and the error message is bubbled up for the audit field.
+    The algorithm is greedy: slips are processed in input order; each one
+    grabs the first eligible credit it sees. In David's test data this
+    gives a unique correct answer because every (month, amount) tuple is
+    unique. If collisions arise in larger datasets we may want a smarter
+    assignment (Hungarian / institution-aware tie-break) — recorded as
+    future work in the spec.
     """
-    if not slips or not credits:
-        # Nothing to match — degenerate but valid case.
-        return [], list(slips), list(credits), None
-
     settings = get_settings()
-    tolerance = settings.match_amount_tolerance_pct
+    tolerance_rp = settings.match_amount_tolerance_rp
 
-    slip_payload = [
-        {
-            "id": i,
-            "source_file": s.source_file,
-            "worker_name": s.worker_name,
-            "institution_name": s.institution_name,
-            "total_paid": s.total_paid,
-            "month": s.month,
-        }
-        for i, s in enumerate(slips)
-    ]
-    credit_payload = [
-        {
-            "id": i,
-            "source_file": c.source_file,
-            "tanggal": c.tanggal,
-            "keterangan": c.keterangan,
-            "amount": c.amount,
-            "month": c.month,
-        }
-        for i, c in enumerate(credits)
-    ]
+    # Index credits by month for O(1) lookups.
+    credits_by_month: dict[str, list[tuple[int, GajiCredit]]] = defaultdict(list)
+    for idx, c in enumerate(credits):
+        if c.month:
+            credits_by_month[c.month].append((idx, c))
 
-    client = AsyncAzureOpenAI(
-        azure_endpoint=settings.azure_openai_endpoint,
-        api_key=settings.azure_openai_api_key,
-        api_version=settings.azure_openai_api_version,
-        timeout=settings.llm_request_timeout_s,
-    )
-
-    try:
-        completion = await client.chat.completions.create(
-            model=settings.azure_openai_deployment,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT.format(tolerance=tolerance)},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {"month": month, "slips": slip_payload, "credits": credit_payload},
-                        ensure_ascii=False,
-                    ),
-                },
-            ],
-            response_format={"type": "json_schema", "json_schema": _response_schema()},
-            temperature=0,
-        )
-        raw = completion.choices[0].message.content or "{}"
-        decoded = json.loads(raw)
-        pairs = decoded.get("pairs", [])
-    except (APIError, APITimeoutError, json.JSONDecodeError, KeyError) as exc:
-        logger.warning("matcher LLM call failed for month %s: %s", month, exc)
-        return [], list(slips), list(credits), f"{month}: {exc}"
-
-    # Build response, enforcing hard rules in code (defense-in-depth — the LLM
-    # has been observed proposing pairs that violate rule 2 with an explicit
-    # admission, so we don't rely on it for safety).
+    matches: list[MatchPair] = []
     used_credit_ids: set[int] = set()
     matched_slip_ids: set[int] = set()
-    matches: list[MatchPair] = []
-    for p in pairs:
-        sid = p.get("slip_id")
-        cid = p.get("credit_id")
-        if not isinstance(sid, int) or sid < 0 or sid >= len(slips):
-            continue
-        if cid is None:
-            continue  # the LLM said "no match" — fine, slip will surface as unmatched
-        if not isinstance(cid, int) or cid < 0 or cid >= len(credits):
+
+    for sid, slip in enumerate(slips):
+        if slip.total_paid is None or slip.month is None:
+            logger.info("matcher: slip %d skipped (missing month or total_paid)", sid)
             continue
 
-        slip = slips[sid]
-        credit = credits[cid]
-        if not slip.total_paid:
-            logger.info("matcher: skipping slip %d (month %s) — total_paid is missing", sid, month)
-            continue
+        target = float(slip.total_paid)
+        # Try X+1 first (the common Indonesian payroll-vs-bank pattern), then X.
+        candidate_months: list[tuple[str, str]] = []
+        next_m = _month_plus_one(slip.month)
+        if next_m:
+            candidate_months.append((next_m, "next_month"))
+        candidate_months.append((slip.month, "same_month"))
 
-        # Rule 3: each credit assigned to at most one slip.
-        if cid in used_credit_ids:
-            logger.info("matcher rule-3 violation rejected: credit %d reused for slip %d (month %s)",
-                        cid, sid, month)
-            continue
+        for cand_month, pattern in candidate_months:
+            picked: tuple[int, GajiCredit] | None = None
+            for cid, credit in credits_by_month.get(cand_month, []):
+                if cid in used_credit_ids:
+                    continue
+                if abs(float(credit.amount) - target) <= tolerance_rp:
+                    picked = (cid, credit)
+                    break
+            if picked is None:
+                continue
 
-        # Rule 2: amount tolerance (the spec's hard rule).
-        diff_rp = float(credit.amount) - float(slip.total_paid)
-        diff_pct = diff_rp / float(slip.total_paid)
-        if abs(diff_pct) > tolerance:
-            logger.info("matcher rule-2 violation rejected: slip %d ↔ credit %d in %s "
-                        "has |diff_pct|=%.3f > tolerance=%.3f",
-                        sid, cid, month, abs(diff_pct), tolerance)
-            continue
+            cid, credit = picked
+            used_credit_ids.add(cid)
+            matched_slip_ids.add(sid)
 
-        # Accepted.
-        used_credit_ids.add(cid)
-        matched_slip_ids.add(sid)
-        try:
-            credit_day = int(credit.tanggal.split("-")[2])
-        except (IndexError, ValueError):
-            credit_day = 0
-        matches.append(MatchPair(
-            slip=slip,
-            credit=credit,
-            confidence=float(p.get("confidence") or 0.0),
-            reason=str(p.get("reason") or ""),
-            amount_diff_rp=diff_rp,
-            amount_diff_pct=diff_pct,
-            days_off=0 if credit_day == 0 else abs(credit_day - 28),
-        ))
+            diff_rp = float(credit.amount) - target
+            diff_pct = diff_rp / target if target else 0.0
+            day = _credit_day(credit)
+            reason = (
+                f"Exact-amount match (diff Rp {diff_rp:+.0f}); "
+                f"slip month {slip.month} → credit month {cand_month} "
+                f"({'X+1 payroll-lag pattern' if pattern == 'next_month' else 'same-month pattern'})"
+            )
+            matches.append(MatchPair(
+                slip=slip,
+                credit=credit,
+                confidence=1.0,
+                reason=reason,
+                amount_diff_rp=diff_rp,
+                amount_diff_pct=diff_pct,
+                days_off=day,
+                match_pattern=pattern,
+            ))
+            break  # this slip is done; move to next slip
 
     unmatched_slips = [s for i, s in enumerate(slips) if i not in matched_slip_ids]
     unmatched_credits = [c for i, c in enumerate(credits) if i not in used_credit_ids]
-    return matches, unmatched_slips, unmatched_credits, None
-
-
-async def match_all_months(
-    by_month: dict[str, tuple[list[ParsedSlip], list[GajiCredit]]],
-) -> tuple[list[MatchPair], list[ParsedSlip], list[GajiCredit], list[str]]:
-    """Fan-out: one concurrent LLM call per month.
-
-    Returns:
-        (all_matches, all_unmatched_slips, all_unmatched_credits, errors).
-    """
-    coroutines = [match_month(m, slips, credits) for m, (slips, credits) in by_month.items()]
-    results = await asyncio.gather(*coroutines, return_exceptions=False)
-
-    all_matches: list[MatchPair] = []
-    all_unmatched_slips: list[ParsedSlip] = []
-    all_unmatched_credits: list[GajiCredit] = []
-    errors: list[str] = []
-    for matches, unmatched_slips, unmatched_credits, err in results:
-        all_matches.extend(matches)
-        all_unmatched_slips.extend(unmatched_slips)
-        all_unmatched_credits.extend(unmatched_credits)
-        if err:
-            errors.append(err)
-    return all_matches, all_unmatched_slips, all_unmatched_credits, errors
+    return matches, unmatched_slips, unmatched_credits

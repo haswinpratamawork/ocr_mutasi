@@ -24,9 +24,15 @@ class Settings(BaseSettings):
     app_port: int = 8200
 
     # Timeouts & limits
-    llm_request_timeout_s: float = 60.0
+    llm_request_timeout_s: float = 60.0  # reserved for a future LLM-tiebreak path
     upstream_timeout_s: float = 120.0
-    match_amount_tolerance_pct: float = 0.15
+
+    # Matching tolerance in absolute rupiah. The user's domain guarantees
+    # slip and credit amounts agree to the rupiah for genuine pairs, so the
+    # default is essentially "exact match with float-safety wiggle". Bump
+    # to e.g. 1000 if you have cents-rounding or fee adjustments.
+    match_amount_tolerance_rp: float = 1.0
+
     max_files: int = 50
 
     model_config = SettingsConfigDict(

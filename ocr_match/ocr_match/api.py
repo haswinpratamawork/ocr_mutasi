@@ -218,6 +218,11 @@ _UPLOAD_PAGE = """<!doctype html>
     .pair .footer .conf { font-weight: 600; color: var(--fg); }
     .pair .footer .diff.pos { color: var(--ok); } .pair .footer .diff.neg { color: var(--err); }
     .pair .footer .reason { margin-top: 4px; font-style: italic; }
+    .pair .footer .badge { display: inline-block; padding: 2px 8px; border-radius: 4px;
+                           font-size: 11px; font-weight: 600; letter-spacing: .04em;
+                           text-transform: uppercase; }
+    .pair .footer .badge.pattern-next_month { background: #dbeafe; color: #1e40af; }
+    .pair .footer .badge.pattern-same_month { background: #f3e8ff; color: #6b21a8; }
     /* Unmatched lists */
     #unmatched .group { background: var(--panel); border: 1px solid var(--border);
                         border-radius: 8px; padding: 12px 16px; margin-bottom: 10px; }
@@ -421,9 +426,13 @@ function renderMatches(data) {
           <div class="amount">${fmtRp(p.credit.amount)}</div>
         </div>
         <div class="footer">
-          <span class="conf">confidence ${p.confidence.toFixed(2)}</span>
+          <span class="badge pattern-${esc(p.match_pattern || 'same_month')}">${
+            (p.match_pattern || 'same_month') === 'next_month' ? 'X+1' : 'same month'
+          }</span>
           &nbsp;·&nbsp;
-          diff: <span class="diff ${cls}">${sign}${fmtRp(p.amount_diff_rp)} (${sign}${pct}%)</span>
+          <span class="conf">conf ${p.confidence.toFixed(2)}</span>
+          &nbsp;·&nbsp;
+          diff: <span class="diff ${cls}">${sign}${fmtRp(p.amount_diff_rp)}${p.slip.total_paid ? ` (${sign}${pct}%)` : ''}</span>
           <div class="reason">${esc(p.reason)}</div>
         </div>
       </div>`;

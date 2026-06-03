@@ -19,7 +19,7 @@ import re
 from collections import defaultdict
 from typing import Optional
 
-from .matcher import match_all_months
+from .matcher import match_all
 from .models import GajiCredit, MatchAudit, MatchResponse, ParsedSlip
 from .upstream import (
     UpstreamHttpError,
@@ -110,43 +110,32 @@ async def run(
         upstream_errors.append(f"ocr_mutasi: {exc}")
         return _empty_response(slips, [], upstream_errors)
 
-    # Step 2 — tag with month.
+    # Step 2 — tag each item with its month (YYYY-MM).
     for s in slips:
         s.month = _slip_month(s)
     for c in credits:
         c.month = _credit_month(c)
 
-    # Step 3 — group by month, intersected. Slips/credits without a month
-    # are left out of buckets entirely; they'll surface as unmatched below.
-    months = sorted({s.month for s in slips if s.month}
-                    | {c.month for c in credits if c.month})
-    by_month: dict[str, tuple[list[ParsedSlip], list[GajiCredit]]] = {}
-    for m in months:
-        m_slips = [s for s in slips if s.month == m]
-        m_credits = [c for c in credits if c.month == m]
-        if m_slips:  # only run a month bucket that has at least one slip to assign
-            by_month[m] = (m_slips, m_credits)
+    # Step 3 — run the deterministic matcher across all slips and credits.
+    # The matcher itself handles the X+1 / X month-shift logic and exact-amount
+    # rule — no per-month grouping needed here.
+    matches, unmatched_slips, unmatched_credits = match_all(slips, credits)
 
-    # Step 4 — concurrent LLM matcher, one call per month bucket.
-    if by_month:
-        matches, unmatched_slips, unmatched_credits, matcher_errors = await match_all_months(by_month)
-    else:
-        matches, matcher_errors = [], []
-        unmatched_slips = list(slips)
-        unmatched_credits = list(credits)
-
-    # Step 5 — anything outside the per-month buckets is unmatched by default.
-    slip_ids_in_match = {id(p.slip) for p in matches}
-    slip_ids_returned_unmatched = {id(s) for s in unmatched_slips}
-    for s in slips:
-        if id(s) not in slip_ids_in_match and id(s) not in slip_ids_returned_unmatched:
-            unmatched_slips.append(s)
-
-    credit_ids_in_match = {id(p.credit) for p in matches}
-    credit_ids_returned_unmatched = {id(c) for c in unmatched_credits}
-    for c in credits:
-        if id(c) not in credit_ids_in_match and id(c) not in credit_ids_returned_unmatched:
-            unmatched_credits.append(c)
+    # ``months_processed`` is now informational: every distinct slip month
+    # (and, for visibility, the next-month buckets we looked into).
+    slip_months = {s.month for s in slips if s.month}
+    next_months = set()
+    for m in slip_months:
+        try:
+            y, mo = m.split("-")
+            mo_i = int(mo) + 1
+            yr_i = int(y)
+            if mo_i > 12:
+                mo_i, yr_i = 1, yr_i + 1
+            next_months.add(f"{yr_i:04d}-{mo_i:02d}")
+        except (ValueError, AttributeError):
+            pass
+    months_processed = sorted(slip_months | next_months)
 
     return MatchResponse(
         matches=matches,
@@ -156,8 +145,8 @@ async def run(
             slip_count=len(slips),
             credit_count=len(credits),
             matched_count=len(matches),
-            months_processed=sorted(by_month.keys()),
-            matcher_errors=matcher_errors,
+            months_processed=months_processed,
+            matcher_errors=[],  # deterministic matcher can't fail
             upstream_errors=upstream_errors,
         ),
     )
