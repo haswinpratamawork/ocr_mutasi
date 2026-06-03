@@ -87,15 +87,23 @@ def _credit_month(credit: GajiCredit) -> Optional[str]:
 async def run(
     slip_pdfs: list[tuple[str, bytes]],
     mutation_pdfs: list[tuple[str, bytes]],
+    *,
+    slip_password: str | None = None,
+    mutation_password: str | None = None,
 ) -> MatchResponse:
-    """Pair the uploaded slips with the uploaded bank statements."""
+    """Pair the uploaded slips with the uploaded bank statements.
+
+    ``slip_password`` and ``mutation_password`` are forwarded independently
+    to the two upstream services. The two file groups commonly use different
+    encryption (slip = employee ID, bank statement = account-no last 6).
+    """
     upstream_errors: list[str] = []
     slips: list[ParsedSlip] = []
     credits: list[GajiCredit] = []
 
     # Step 1 — fan out upstream calls concurrently.
-    slip_task = asyncio.create_task(parse_slips(slip_pdfs))
-    mut_task = asyncio.create_task(extract_mutations(mutation_pdfs))
+    slip_task = asyncio.create_task(parse_slips(slip_pdfs, password=slip_password))
+    mut_task = asyncio.create_task(extract_mutations(mutation_pdfs, password=mutation_password))
 
     try:
         slips = await slip_task

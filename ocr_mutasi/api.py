@@ -10,14 +10,14 @@ from __future__ import annotations
 import logging
 from typing import List
 
-from fastapi import FastAPI, File, HTTPException, Query, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from . import __version__
 from .config import get_settings
 from .models import BatchExtractionResponse, ExtractionResponse
-from .pdf_extractor import InvalidPdfError
+from .pdf_extractor import InvalidPdfError, PdfPasswordRequiredError
 from .pipeline import UnsupportedBankError, run as run_pipeline, run_batch as run_pipeline_batch
 
 logger = logging.getLogger("ocr_mutasi.api")
@@ -122,6 +122,12 @@ _UPLOAD_PAGE = """<!doctype html>
     input[type=file] { display: none; }
     #file-list { margin-top: 12px; padding: 0; list-style: none; font-size: 13px; }
     #file-list li { padding: 4px 0; color: var(--muted); }
+    .pw-row { margin-top: 14px; }
+    .pw-row label { display: block; font-size: 12px; text-transform: uppercase;
+                    letter-spacing: .04em; color: var(--muted); margin-bottom: 4px; }
+    .pw-row input[type=password] { width: 100%; padding: 8px 10px; border-radius: 6px;
+                                   border: 1px solid var(--border); font: inherit; font-size: 13px; }
+    .pw-row .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
     .controls { display: flex; gap: 16px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
     button { font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 6px;
              border: none; background: var(--accent); color: #fff; cursor: pointer; }
@@ -181,6 +187,12 @@ _UPLOAD_PAGE = """<!doctype html>
         <input type="file" id="files" name="files" accept="application/pdf,.pdf" multiple>
       </label>
       <ul id="file-list"></ul>
+
+      <div class="pw-row">
+        <label for="password">PDF password (optional)</label>
+        <input type="password" id="password" name="password" placeholder="Leave blank for unencrypted PDFs">
+        <div class="hint">Indonesian e-statements commonly use the last 6 digits of the account number, the birthdate in DDMMYYYY, or NIK. The same value is applied to every file in this upload.</div>
+      </div>
 
       <div class="controls">
         <label class="opt"><input type="checkbox" id="classify" checked> Classify credits with LLM (Gaji / THR / Bonus / Insentif)</label>
@@ -242,6 +254,8 @@ form.addEventListener('submit', async (e) => {
   }
   const fd = new FormData();
   for (const f of filesIn.files) fd.append('files', f, f.name);
+  const pw = document.getElementById('password').value;
+  if (pw) fd.append('password', pw);
   const classify = classifyOpt.checked;
   status.className = '';
   status.textContent = `Uploading ${filesIn.files.length} file(s)…`;
@@ -363,6 +377,15 @@ def health() -> dict:
 async def extract_mutations(
     file: UploadFile = File(..., description="BCA Rekening Tahapan PDF"),
     classify: bool = Query(True, description="Run LLM classification on credit rows."),
+    password: str | None = Form(
+        None,
+        description=(
+            "Optional PDF password if the file is encrypted. "
+            "Common patterns for Indonesian e-statements: last 6 digits of "
+            "account number / birthdate DDMMYYYY / NIK. Leave blank for "
+            "unencrypted PDFs."
+        ),
+    ),
 ) -> ExtractionResponse:
     settings = get_settings()
 
@@ -380,7 +403,19 @@ async def extract_mutations(
         )
 
     try:
-        result = run_pipeline(data, classify=classify)
+        result = run_pipeline(data, classify=classify, password=password)
+    except PdfPasswordRequiredError as exc:
+        # Distinct status detail so the client can prompt the user for a
+        # password instead of treating it like a corrupt file.
+        logger.warning("rejected upload (PdfPasswordRequiredError): %s", exc)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "PDF is password-protected. Pass the password as the 'password' "
+                "form field. Indonesian e-statements commonly use the account "
+                "number's last 6 digits, the birthdate in DDMMYYYY, or NIK."
+            ),
+        ) from exc
     except (InvalidPdfError, UnsupportedBankError) as exc:
         # Client-side fault — the upload itself was the problem. Single-line
         # warning, no traceback; the client gets the message in the response.
@@ -448,6 +483,14 @@ async def extract_mutations_batch(
         ),
     ),
     classify: bool = Query(True, description="Run cross-month LLM classification on credits."),
+    password: str | None = Form(
+        None,
+        description=(
+            "Optional PDF password applied to EVERY file in the batch. "
+            "If different files have different passwords, upload them in "
+            "separate requests."
+        ),
+    ),
 ) -> BatchExtractionResponse:
     settings = get_settings()
     if not files:
@@ -466,7 +509,17 @@ async def extract_mutations_batch(
         payload.append((f.filename or "uploaded.pdf", data))
 
     try:
-        result = run_pipeline_batch(payload, classify=classify)
+        result = run_pipeline_batch(payload, classify=classify, password=password)
+    except PdfPasswordRequiredError as exc:
+        logger.warning("rejected batch (PdfPasswordRequiredError): %s", exc)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "One or more PDFs in the batch are password-protected. Pass the "
+                "password as the 'password' form field. If files have different "
+                "passwords, upload them in separate requests."
+            ),
+        ) from exc
     except (InvalidPdfError, UnsupportedBankError) as exc:
         logger.warning("rejected batch (%s): %s", type(exc).__name__, exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import List
 
-from fastapi import FastAPI, File, HTTPException, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -115,6 +115,18 @@ def health() -> dict:
 async def match_endpoint(
     slips: List[UploadFile] = File(..., description="Salary-slip PDFs."),
     mutations: List[UploadFile] = File(..., description="Bank-statement PDFs."),
+    slip_password: str | None = Form(
+        None,
+        description=(
+            "Optional PDF password applied to every salary-slip PDF in the "
+            "request. Slips and bank statements typically use different "
+            "passwords; specify them independently."
+        ),
+    ),
+    mutation_password: str | None = Form(
+        None,
+        description="Optional PDF password applied to every bank-statement PDF.",
+    ),
 ) -> MatchResponse:
     settings = get_settings()
     if not slips:
@@ -145,7 +157,12 @@ async def match_endpoint(
     mutation_pdfs = await _gather(mutations)
 
     try:
-        return await run_pipeline(slip_pdfs, mutation_pdfs)
+        return await run_pipeline(
+            slip_pdfs,
+            mutation_pdfs,
+            slip_password=slip_password,
+            mutation_password=mutation_password,
+        )
     except UpstreamUnreachableError as exc:
         logger.warning("upstream unreachable: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -193,6 +210,13 @@ _UPLOAD_PAGE = """<!doctype html>
     input[type=file] { display: none; }
     .file-list { margin-top: 8px; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
     .file-list li { padding: 2px 0; }
+    .pw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 14px; }
+    @media (max-width: 720px) { .pw-grid { grid-template-columns: 1fr; } }
+    .pw-grid label { display: block; font-size: 12px; text-transform: uppercase;
+                     letter-spacing: .04em; color: var(--muted); margin-bottom: 4px; }
+    .pw-grid input[type=password] { width: 100%; padding: 8px 10px; border-radius: 6px;
+                                    border: 1px solid var(--border); font: inherit; font-size: 13px; }
+    .pw-grid .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
     .controls { display: flex; gap: 16px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
     button { font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 6px;
              border: none; background: var(--accent); color: #fff; cursor: pointer; }
@@ -274,6 +298,19 @@ _UPLOAD_PAGE = """<!doctype html>
           <ul class="file-list" id="list-m"></ul>
         </label>
       </div>
+      <div class="pw-grid">
+        <div>
+          <label for="slip_password">Slip-PDF password (optional)</label>
+          <input type="password" id="slip_password" name="slip_password" placeholder="Leave blank for unencrypted slips">
+          <div class="hint">Usually employee ID, NIK, or birthdate.</div>
+        </div>
+        <div>
+          <label for="mutation_password">Bank-statement password (optional)</label>
+          <input type="password" id="mutation_password" name="mutation_password" placeholder="Leave blank for unencrypted statements">
+          <div class="hint">Usually account-no last 6 digits, DDMMYYYY, or NIK.</div>
+        </div>
+      </div>
+
       <div class="controls">
         <button type="submit" id="go">Match</button>
       </div>
@@ -349,6 +386,10 @@ form.addEventListener('submit', async (e) => {
   const fd = new FormData();
   for (const f of slipsIn.files) fd.append('slips', f, f.name);
   for (const f of mutsIn.files)  fd.append('mutations', f, f.name);
+  const sp = document.getElementById('slip_password').value;
+  const mp = document.getElementById('mutation_password').value;
+  if (sp) fd.append('slip_password', sp);
+  if (mp) fd.append('mutation_password', mp);
 
   status.className = '';
   status.textContent = `Matching ${slipsIn.files.length} slip(s) against ${mutsIn.files.length} statement(s)…`;

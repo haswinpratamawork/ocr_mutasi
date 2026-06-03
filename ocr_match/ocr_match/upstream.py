@@ -36,11 +36,15 @@ class UpstreamHttpError(RuntimeError):
 
 # --------------------------- ocr_slip → ParsedSlip[] -----------------------
 
-async def parse_slips(pdfs: list[tuple[str, bytes]]) -> list[ParsedSlip]:
+async def parse_slips(
+    pdfs: list[tuple[str, bytes]],
+    password: str | None = None,
+) -> list[ParsedSlip]:
     """POST a batch of slip PDFs to ocr_slip:/parse and return ParsedSlip objects.
 
     Args:
         pdfs: list of (filename, bytes) tuples.
+        password: optional PDF password applied to every slip in the batch.
 
     Raises:
         UpstreamUnreachableError: ocr_slip refused the connection.
@@ -50,11 +54,15 @@ async def parse_slips(pdfs: list[tuple[str, bytes]]) -> list[ParsedSlip]:
     files: list[tuple[str, tuple[str, bytes, str]]] = [
         ("files", (name, data, "application/pdf")) for name, data in pdfs
     ]
+    data: dict[str, str] = {}
+    if password:
+        data["password"] = password
     try:
         async with httpx.AsyncClient(timeout=settings.upstream_timeout_s) as client:
             r = await client.post(
                 f"{settings.ocr_slip_url}/parse",
                 files=files,
+                data=data,
                 params={"ocr": "auto"},
             )
     except httpx.ConnectError as exc:
@@ -70,12 +78,17 @@ async def parse_slips(pdfs: list[tuple[str, bytes]]) -> list[ParsedSlip]:
 
 # --------------------------- ocr_mutasi → GajiCredit[] ---------------------
 
-async def extract_mutations(pdfs: list[tuple[str, bytes]]) -> list[GajiCredit]:
+async def extract_mutations(
+    pdfs: list[tuple[str, bytes]],
+    password: str | None = None,
+) -> list[GajiCredit]:
     """POST a batch of bank-statement PDFs to ocr_mutasi:/extract-batch and
     return only the credits that were classified as Gaji.
 
     Args:
         pdfs: list of (filename, bytes) tuples.
+        password: optional PDF password applied to every bank statement in
+            the batch.
 
     Raises:
         UpstreamUnreachableError, UpstreamHttpError (same semantics as above).
@@ -84,11 +97,15 @@ async def extract_mutations(pdfs: list[tuple[str, bytes]]) -> list[GajiCredit]:
     files: list[tuple[str, tuple[str, bytes, str]]] = [
         ("files", (name, data, "application/pdf")) for name, data in pdfs
     ]
+    data: dict[str, str] = {}
+    if password:
+        data["password"] = password
     try:
         async with httpx.AsyncClient(timeout=settings.upstream_timeout_s) as client:
             r = await client.post(
                 f"{settings.ocr_mutasi_url}/api/v1/mutations/extract-batch",
                 files=files,
+                data=data,
                 params={"classify": "true"},
             )
     except httpx.ConnectError as exc:

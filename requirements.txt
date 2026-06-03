@@ -1,6 +1,11 @@
 # PDF text-layer extraction
 pypdfium2>=4.30,<5
 
+# Fallback for encrypted PDFs — opens more encryption variants than pypdfium2
+# alone and can strip owner-only locks. Used by pdf_extractor as a second-try
+# when pypdfium2 refuses a password-protected file.
+pikepdf>=9.0,<10
+
 # Web framework
 fastapi>=0.115,<1
 uvicorn[standard]>=0.32,<1

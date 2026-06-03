@@ -29,9 +29,19 @@ class UnsupportedBankError(ValueError):
     """Raised when the PDF doesn't match any known bank layout."""
 
 
-def run(pdf_bytes: bytes, *, classify: bool = True) -> ExtractionResponse:
-    """Run extraction + (optionally) LLM classification on a PDF."""
-    chunks = extract_chunks(pdf_bytes)
+def run(
+    pdf_bytes: bytes,
+    *,
+    classify: bool = True,
+    password: str | None = None,
+) -> ExtractionResponse:
+    """Run extraction + (optionally) LLM classification on a PDF.
+
+    ``password`` is forwarded to the PDF opener so encrypted statements
+    (Indonesian e-statements commonly use account-no / DOB / NIK) open
+    cleanly when the caller provides the right value.
+    """
+    chunks = extract_chunks(pdf_bytes, password=password)
     bank = detect_bank(chunks)
     if bank == "UNKNOWN":
         raise UnsupportedBankError(
@@ -67,9 +77,13 @@ def run(pdf_bytes: bytes, *, classify: bool = True) -> ExtractionResponse:
     )
 
 
-def _extract_one(filename: str, pdf_bytes: bytes) -> FileExtraction:
+def _extract_one(
+    filename: str,
+    pdf_bytes: bytes,
+    password: str | None = None,
+) -> FileExtraction:
     """Extract a single file without classifying — used by run_batch."""
-    chunks = extract_chunks(pdf_bytes)
+    chunks = extract_chunks(pdf_bytes, password=password)
     bank = detect_bank(chunks)
     if bank == "UNKNOWN":
         raise UnsupportedBankError(
@@ -99,6 +113,7 @@ def run_batch(
     files: list[tuple[str, bytes]],
     *,
     classify: bool = True,
+    password: str | None = None,
 ) -> BatchExtractionResponse:
     """Extract multiple PDFs and run a SINGLE cross-month classification.
 
@@ -109,7 +124,7 @@ def run_batch(
     file_results: list[FileExtraction] = []
     credits_with_source: list[tuple[str, "Transaction"]] = []  # type: ignore[name-defined]
     for filename, data in files:
-        fe = _extract_one(filename, data)
+        fe = _extract_one(filename, data, password=password)
         file_results.append(fe)
         for tx in fe.transactions:
             if tx.type == "CR":
