@@ -23,9 +23,14 @@ secrets/
 #     !samples/synthetic_example.pdf
 *.pdf
 
-# The 12-month BRI sample folder — ignored independently so accidental
-# `git add mutasi_haswin/` (without a wildcard) still does nothing.
-mutasi_haswin/
+# Per-debtor sample folders — ignored as wildcards so naming any specific
+# debtor here doesn't itself leak PII (the directory names on disk carry
+# real customer first names; this .gitignore is public on GitHub). Every
+# file inside is real bank-statement or salary-slip PII for one customer.
+mutasi_*/
+slip_*/
+# Internal credit-analysis sample bundle (generic name, no PII in itself).
+sample_document_analisa_kredit/
 
 # Generated / scratch outputs
 out/

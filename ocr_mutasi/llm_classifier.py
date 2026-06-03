@@ -26,7 +26,7 @@ from .models import ClassifiedCredit, Transaction
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You classify INCOMING credit rows from an Indonesian bank \
-statement (BCA, BRI, or Mandiri) into one of five categories.
+statement (BCA, BRI, Mandiri, Permata, or Sinarmas) into one of five categories.
 
 You see ONLY ONE statement's credits at a time, so you cannot verify monthly \
 recurrence. The classification is mostly driven by an explicit label in the \
@@ -69,23 +69,50 @@ mixed labels.
    These are work-tied perks paid alongside Gaji — they belong in Insentif, \
 NOT in Lainnya.
 
-4. **Gaji — three flavours, all requiring a CORPORATE SENDER** (e.g. `PT \
-<X>`, `<X> PT`, `<X> INDO`, `<X> JAKARTA`, `<X> BSD`, `<X> ALAM SUTERA`, \
-`<X> TBK`, `CV <X>`, `KASTARA <X>`, etc. — a registered-company-style name, \
-NOT a personal name like `BUDI SANTOSO` or `DRG.JOKO HARTONO`):
-   (a) **Employer-facing payroll labels** in the description: `GAJI`, \
+4. **Gaji — four flavours.** Flavours (a) and (c) REQUIRE a CORPORATE \
+SENDER (e.g. `PT <X>`, `<X> PT`, `<X> INDO`, `<X> JAKARTA`, `<X> BSD`, \
+`<X> ALAM SUTERA`, `<X> TBK`, `CV <X>`, `KASTARA <X>`, etc. — a registered- \
+company-style name, NOT a personal name like `BUDI SANTOSO` or `DRG.JOKO \
+HARTONO`). Flavours (b) and (d) are bank-product labels self-sufficient on \
+their own.
+
+   **Bank names are NOT corporate senders.** Strings like `PT. BANK <X>` \
+(e.g. `PT. BANK JASA JAKARTA`, `PT. BANK CENTRAL ASIA`, `PT. BANK MANDIRI`, \
+`PT. BANK NEGARA INDONESIA`, `PT. BANK PERMATA`, `PT. BANK SINARMAS`, \
+`PT. BANK RAKYAT INDONESIA`, `PT. BANK CIMB NIAGA`, `PT. BANK DANAMON`, \
+`PT. BANK MAYBANK INDONESIA`, `PT. BANK OCBC NISP`, `PT. BANK UOB INDONESIA`, \
+`PT. BANK BTPN`, `PT. BANK BCA SYARIAH`, etc.) are the COUNTERPARTY'S BANK \
+(routing info, not the sender). For BIFAST / BI Fast / RTGS / LLG-style \
+transfers, the actual sender is the person/company NAME that appears \
+alongside the bank — typically AFTER an account number, or before/after \
+the bank in the same row. If that sender NAME is a personal first name \
+(`SITI`, `BUDI`, `JONI`, `JOKO`, ...) or two-word personal name → \
+Lainnya per rule 5. A bank name with `PT.` prefix is NOT a payroll source.
+
+   (a) **Employer-facing payroll labels** + corporate sender: `GAJI`, \
 `PAYROLL`, `SALARY`, `TRSF GAJI`, `PAYROLL-DEPOSIT`, `SALARY-CRDT`.
-   (b) **Bank bulk-payroll product labels**: `SAP-DD` (SAP Direct Deposit), \
+   (b) **Bank bulk-payroll product labels — self-sufficient** (the label \
+alone is the signal; no corporate sender required because these channels \
+don't always expose the employer name): `SAP-DD` (SAP Direct Deposit), \
 `KR OTOMATIS` (BCA auto-credit, when NOT accompanied by an `LLG` label — \
 rule 3 catches the LLG case first), `SMEMFTS` (BCA SME Mass Funds Transfer \
 Service — the primary salary channel).
-   (c) **Professional-fee / honorarium labels** — payment FOR work done, \
-where the description names the kind of work and the sender is a company: \
-`FEE DOKTER`, `FEE DRG` (Dokter Gigi), `FEE NOTARIS`, `FEE INSINYUR`, \
-`FEE KONSULTAN`, `FEE PENGACARA`, `FEE [profession]`, `HONOR`, \
-`HONORARIUM`, `JASA <name>`, `RETAINER`. Example matches from real data: \
-`TRSF E-BANKING CR <ref> | FEE DOKTER | PT KLINIK CONTOH JAKARTA` → **Gaji**, \
-`TRSF E-BANKING CR <ref> | FEE DRG JOKO | KLINIK CONTOH BSD` → **Gaji**.
+   (c) **Professional-fee / honorarium labels** + corporate sender — \
+payment FOR work done, where the description names the kind of work and \
+the sender is a company: `FEE DOKTER`, `FEE DRG` (Dokter Gigi), \
+`FEE NOTARIS`, `FEE INSINYUR`, `FEE KONSULTAN`, `FEE PENGACARA`, \
+`FEE [profession]`, `HONOR`, `HONORARIUM`, `JASA <kind-of-service>`, \
+`RETAINER`. `JASA` must be followed by a service-kind word (e.g. `JASA \
+KONSULTAN`, `JASA DESAIN`, `JASA HUKUM`); `BANK JASA <city>` is a bank \
+name, NOT a `JASA <name>` fee. Example matches: `TRSF E-BANKING CR <ref> \
+| FEE DOKTER | PT KLINIK CONTOH JAKARTA` → **Gaji**, `TRSF E-BANKING CR \
+<ref> | FEE DRG JOKO | KLINIK CONTOH BSD` → **Gaji**.
+   (d) **Sinarmas payroll auto-channel — self-sufficient**: any description \
+containing `AUTO TRANSFER CREDIT` is the Sinarmas Tabungan payroll auto- \
+deposit channel and classifies as Gaji on the label alone, with NO \
+corporate sender required (the Sinarmas channel does not expose the \
+employer name in the row; only a branch code like `BSD` accompanies it). \
+Example: `BSD | Auto Transfer Credit` → **Gaji**.
 
    **Hard exclusion for rule 4 (overrides any match above):** if the \
 description contains `CASHBACK`, `REFUND`, `REIMBURSE`, `REIMBURSEMENT`, \
@@ -95,10 +122,15 @@ are merchant/bank disbursements, not employer payments, even if the apparent \
 CASHBACK QRIS BCA \| DI MERCHANT XYZ` is Lainnya, not Gaji).
 
 5. **Otherwise → "Lainnya"** — peer-to-peer transfers from a person's name \
-(`Transfer Dari <name>`, `BIF TRANSFER DR <name>`, or any clearly-personal \
-sender like `BUDI SANTOSO`, `DRG.JOKO HARTONO`, `JONI WIJAYA`), refunds, \
-interest (`BUNGA`), sale proceeds, self-transfers, reimbursements, debt \
-repayments (Indonesian `hutang`), anything that lacks the labels in rules 1–4.
+(`Transfer Dari <name>`, `BIF TRANSFER DR <name>`, `BI Fast Payment Cr | \
+PT. BANK <X> | <acct-no> | SITI`, or any clearly-personal sender like \
+`BUDI SANTOSO`, `DRG.JOKO HARTONO`, `JONI WIJAYA`, `SITI`), refunds, \
+interest (`BUNGA`, `Credit Interest`), sale proceeds, self-transfers, \
+reimbursements, debt repayments (Indonesian `hutang`), anything that \
+lacks the labels in rules 1–4. **In particular: a `BI Fast Payment Cr` / \
+`BIF TRANSFER` whose only "corporate-looking" string is a bank name \
+(`PT. BANK …`) and whose sender NAME is a personal first name is \
+ALWAYS Lainnya — the bank is routing, the person is the sender.**
 
 ## Output
 
@@ -195,8 +227,9 @@ def classify_credits(credits: list[Transaction]) -> tuple[list[ClassifiedCredit]
 # --------------------- batch (cross-PDF) classification --------------------
 
 BATCH_SYSTEM_PROMPT = """You classify INCOMING credit rows from Indonesian bank \
-statements (BCA, BRI, Mandiri). You see credits from MULTIPLE monthly \
-statements at once, so you can detect recurring patterns across months. \
+statements (BCA, BRI, Mandiri, Permata, Sinarmas). You see credits from \
+MULTIPLE monthly statements at once, so you can detect recurring patterns \
+across months. \
 Classification is driven by an explicit label in the description first, with \
 cross-month recurrence as a back-up signal for un-labelled rows.
 
@@ -236,22 +269,46 @@ mixed labels.
    These are work-tied perks paid alongside Gaji — they belong in Insentif, \
 NOT in Lainnya.
 
-4. **Gaji — three flavours, all requiring a CORPORATE SENDER** (`PT <X>`, \
-`<X> PT`, `<X> INDO`, `<X> JAKARTA`, `<X> BSD`, `<X> ALAM SUTERA`, \
-`<X> TBK`, `CV <X>`, `KASTARA <X>`, etc. — a registered-company-style name, \
-NOT a personal name):
-   (a) **Employer-facing payroll labels**: `GAJI`, `PAYROLL`, `SALARY`, \
-`TRSF GAJI`, `PAYROLL-DEPOSIT`, `SALARY-CRDT`.
-   (b) **Bank bulk-payroll product labels**: `SAP-DD`, `KR OTOMATIS` (when \
-no `LLG` is present — rule 3 catches the LLG case first), `SMEMFTS` (BCA \
-SME Mass Funds Transfer Service — the primary salary channel).
-   (c) **Professional-fee / honorarium labels** — payment FOR work done, \
-where the description names the kind of work and the sender is a company: \
-`FEE DOKTER`, `FEE DRG`, `FEE NOTARIS`, `FEE INSINYUR`, `FEE KONSULTAN`, \
-`FEE PENGACARA`, `FEE [profession]`, `HONOR`, `HONORARIUM`, `JASA <name>`, \
-`RETAINER`. Example matches: `TRSF E-BANKING CR <ref> \| FEE DOKTER \| PT \
-OSG JAKARTA TIM` → **Gaji**; `TRSF E-BANKING CR <ref> \| FEE DRG JOKO \| \
+4. **Gaji — four flavours.** Flavours (a) and (c) require a CORPORATE \
+SENDER (`PT <X>`, `<X> PT`, `<X> INDO`, `<X> JAKARTA`, `<X> BSD`, `<X> ALAM \
+SUTERA`, `<X> TBK`, `CV <X>`, `KASTARA <X>`, etc. — a registered-company- \
+style name, NOT a personal name). Flavours (b) and (d) are bank-product \
+labels self-sufficient on their own.
+
+   **Bank names are NOT corporate senders.** Strings like `PT. BANK <X>` \
+(`PT. BANK JASA JAKARTA`, `PT. BANK CENTRAL ASIA`, `PT. BANK MANDIRI`, \
+`PT. BANK NEGARA INDONESIA`, `PT. BANK PERMATA`, `PT. BANK SINARMAS`, \
+`PT. BANK RAKYAT INDONESIA`, `PT. BANK CIMB NIAGA`, `PT. BANK DANAMON`, \
+`PT. BANK MAYBANK INDONESIA`, `PT. BANK OCBC NISP`, `PT. BANK UOB \
+INDONESIA`, `PT. BANK BTPN`, etc.) are the COUNTERPARTY'S BANK (routing \
+info, not the sender). For BIFAST / BI Fast / RTGS / LLG-style transfers, \
+the actual sender is the person/company NAME alongside the bank — \
+typically after an account number. If that sender NAME is a personal first \
+name (`SITI`, `BUDI`, `JOKO`, ...) or a two-word personal name → Lainnya \
+per rule 6. A bank name with `PT.` prefix is NOT a payroll source.
+
+   (a) **Employer-facing payroll labels** + corporate sender: `GAJI`, \
+`PAYROLL`, `SALARY`, `TRSF GAJI`, `PAYROLL-DEPOSIT`, `SALARY-CRDT`.
+   (b) **Bank bulk-payroll product labels — self-sufficient** (the label \
+alone is the signal; no corporate sender required): `SAP-DD`, `KR OTOMATIS` \
+(when no `LLG` is present — rule 3 catches the LLG case first), `SMEMFTS` \
+(BCA SME Mass Funds Transfer Service — the primary salary channel).
+   (c) **Professional-fee / honorarium labels** + corporate sender — \
+payment FOR work done, where the description names the kind of work and \
+the sender is a company: `FEE DOKTER`, `FEE DRG`, `FEE NOTARIS`, \
+`FEE INSINYUR`, `FEE KONSULTAN`, `FEE PENGACARA`, `FEE [profession]`, \
+`HONOR`, `HONORARIUM`, `JASA <kind-of-service>`, `RETAINER`. `JASA` must \
+be followed by a service-kind word (`JASA KONSULTAN`, `JASA DESAIN`, \
+`JASA HUKUM`); `BANK JASA <city>` is a bank name, NOT a `JASA <name>` \
+fee. Example matches: `TRSF E-BANKING CR <ref> \| FEE DOKTER \| PT OSG \
+JAKARTA TIM` → **Gaji**; `TRSF E-BANKING CR <ref> \| FEE DRG JOKO \| \
 KLINIK CONTOH BSD` → **Gaji**.
+   (d) **Sinarmas payroll auto-channel — self-sufficient**: any description \
+containing `AUTO TRANSFER CREDIT` is the Sinarmas Tabungan payroll auto- \
+deposit channel and classifies as Gaji on the label alone, with NO corporate \
+sender required (the Sinarmas channel does not expose the employer name in \
+the row — only a branch code like `BSD` accompanies it). Example: \
+`BSD | Auto Transfer Credit` → **Gaji**.
 
    **Hard exclusion for rule 4 (overrides any match above):** if the \
 description contains `CASHBACK`, `REFUND`, `REIMBURSE`, `REIMBURSEMENT`, \
@@ -272,13 +329,19 @@ description names the SAME corporate sender (`PT <X>`, `<X> INDO`, `<X> PT`, \
 "Gaji", even if amounts range widely (e.g. 400K, 11M, 47M; or 5.9M, 6.3M, \
 5.8M for monthly professional fees). Day-of-month consistency is a weaker \
 secondary hint. The same hard exclusion as rule 4 applies: `CASHBACK`, \
-`REFUND`, `BUNGA`, `PROMO` → Lainnya, even with recurrence.
+`REFUND`, `BUNGA`, `PROMO` → Lainnya, even with recurrence. **Bank names \
+are not corporate senders** — recurrence across months of `PT. BANK <X>` \
+strings is just the counterparty repeatedly using the same bank.
 
 6. **Otherwise → "Lainnya"** — peer-to-peer transfers (`Transfer Dari \
-<name>`, `BIF TRANSFER DR <name>`, or any clearly-personal sender like \
-`BUDI SANTOSO`, `DRG.JOKO HARTONO`), refunds, interest (`BUNGA`), sale \
-proceeds, reimbursements, self-transfers, debt repayments (Indonesian \
-`hutang`), anything without any of the labels above.
+<name>`, `BIF TRANSFER DR <name>`, `BI Fast Payment Cr | PT. BANK <X> | \
+<acct-no> | SITI`-style rows), refunds, interest (`BUNGA`, `Credit \
+Interest`), sale proceeds, reimbursements, self-transfers, debt \
+repayments (Indonesian `hutang`), anything without any of the labels \
+above. **In particular: a `BI Fast Payment Cr` / `BIF TRANSFER` whose \
+only "corporate-looking" string is a bank name (`PT. BANK …`) and whose \
+sender NAME is a personal first name is ALWAYS Lainnya — the bank is \
+routing, the person is the sender.**
 
 ## Output
 

@@ -1,6 +1,6 @@
 # OCR Mutasi — Architecture
 
-**Status:** v0.8 (current)
+**Status:** v0.10 (current)
 **Date:** 2026-06-02
 **Audience:** Engineers extending the parser set, the LLM prompts, or the HTTP surface.
 **Companion doc:** [`README.md`](../README.md) (install, run, API examples).
@@ -73,7 +73,7 @@ Bank is auto-detected from page 1 text; no client-side flag needed.
 
 ### Non-Goals (v1)
 - Frontend / UI.
-- Bank layouts beyond BCA Rekening Tahapan, BRI BritAma, and Mandiri Tabungan e-Statement (the pattern to add more is documented in §17).
+- Bank layouts beyond BCA Rekening Tahapan, BRI BritAma, Mandiri Tabungan e-Statement, Permata Rekening Koran, and Sinarmas Tabungan (the pattern to add more is documented in §17).
 - Scanned-image PDFs without a text layer.
 - Authentication / rate limiting (this lives behind an internal gateway).
 - Persistence (responses are returned to the caller; nothing is stored).
@@ -560,6 +560,77 @@ b4 = (layout.nominal.x1 + layout.saldo.x0) / 2   # Nominal / Saldo
 
 **Validated against `sample_mandiri.pdf`:** 7 transactions extracted, sums match the document's own summary box exactly (Dana Masuk Rp 5,000,000.00, Dana Keluar Rp 674,000.00, Saldo Akhir Rp 5,326,000.00), 0 balance warnings, 0 parse warnings.
 
+### 8.4 Permata Rekening Koran
+
+Permata renders into a much larger coordinate space than the other three banks — roughly **2000pt wide** vs 600pt for BCA/BRI/Mandiri. Every layout constant in `parsers/permata.py` is therefore expressed **relative to the header positions detected on page 1**, not hard-coded.
+
+| Column | Header label | Cell content (Indonesian Rp) |
+|---|---|---|
+| Tgl Trx. | `Tgl Trx.` (transaction date) | `DD/MM/YY` |
+| Tgl Valuta | `Tgl Valuta` (value date) | `DD/MM/YY` |
+| Uraian Trx. | `Uraian Trx.` (description) | multi-line, often 2–4 continuation lines |
+| Debet | `Debet` | right-aligned `100.000,00` (blank when CR) |
+| Kredit | `Kredit` | right-aligned `200.000,00` (blank when DB) |
+| Saldo | `Saldo` | right-aligned running balance |
+
+**Column boundary formula** — because the Uraian content extends past the header's right edge into the Debet column, the boundary between Uraian and Debet is *pulled left* by 200pt relative to the detected Debet header `x0`:
+
+```python
+b1 = layout.tgl_valuta.x0 - tol     # Tgl Trx. / Tgl Valuta
+b2 = layout.uraian.x0    - tol      # Tgl Valuta / Uraian
+b3 = layout.debet[0]     - 200.0    # Uraian / Debet  (content overshoot)
+b4 = (layout.debet[1] + layout.kredit[0]) / 2   # Debet / Kredit
+b5 = (layout.kredit[1] + layout.saldo[0]) / 2   # Kredit / Saldo
+```
+
+**Line clustering** — the larger page space also means the default `y_center` tolerance ratio (`0.6` for BCA/BRI) is too tight; chunks from the same row drift apart by 8–10 pt. `cluster_lines(chunks, tol_ratio=1.2)` is used to compensate. This is **only** applied for Permata.
+
+**Quirks:**
+- **Holder name** — extracted from the "Kepada Yth" address block in the header, with address-line prefixes (`JL`, `RT`, `RW`, `KEL`, `KEC`, postal codes) explicitly filtered out so they don't end up in the `nama` field.
+- **Number format** — Indonesian, same as Mandiri (`.` thousands, `,` decimals). Reuses the shared `_parse_id_amount` helper.
+- **Multi-line `Uraian Trx.`** is the rule, not the exception: most rows carry 2–4 continuation lines (recipient detail, BIFAST reference, time-of-day, payment reference number). The grouper packs consecutive lines within the row's vertical span and joins them with ` | ` for downstream readability.
+- **`_permata_field`** — header-side label/value lookups (e.g. periode, currency) use a fixed 50pt right-of-label offset and ±12pt y-center tolerance because Permata's label↔value layout is more rigid than BCA's.
+
+**Validated against `dokumentasi_kredit_debitur_mutasi_rekening (1).pdf`** (11 months, 35 pages): 310 transactions extracted (278 DB + 32 CR), 1 balance warning, 0 parse warnings, holder name extracted cleanly from the "Kepada Yth" block, periode auto-resolved.
+
+### 8.5 Sinarmas Tabungan
+
+Sinarmas's layout is the most unusual of the supported banks. The visual structure on every page is INVERTED relative to the others: period-summary rows sit ABOVE the transaction body, the column headers sit BELOW it, and the account-info block sits at the very bottom. Each transaction's anchor row (date + amount + balance) sits at the LOWEST y of its visual block, with continuation lines (counterparty bank, counterparty account number, QR-merchant code, branch suffix) ABOVE the anchor. Rows are in REVERSE-chronological order within the body — the parser collects them in source order then reverses the list so the response stays forward-chronological like every other bank.
+
+Observed coordinates on the validated sample (page is 600pt wide, similar scale to BCA/BRI):
+
+| Column | Header x-span (English) | Header x-span (Indonesian) | Cell content x range |
+|---|---|---|---|
+| Date / Tanggal | 35.49 – 49.83 | 33.69 – 54.74 | day digit at xc≈27 (LEFT of header); `Apr 2026` at xc≈46 |
+| Description / Keterangan | 123.49 – 160.20 | 123.71 – 159.88 | content at x≈74-145 (well LEFT of the centered header) |
+| Detail | 260.48 – 278.92 | 260.68 – 278.11 | counterparty bank / acct no / name at x≈216-295 |
+| Debit / Debet | 360.48 – 377.46 | 359.74 – 377.93 | right-aligned amount at xc≈393 |
+| Credit / Kredit | 444.58 – 463.84 | 444.45 – 463.37 | right-aligned amount at xc≈473 |
+| Balance / Saldo | 526.10 – 551.72 | 529.83 – 547.72 | right-aligned running balance at xc≈559 |
+
+**Column-boundary formula** (`_column_boundaries` in `sinarmas.py`):
+
+```python
+b1 = layout.date.x1   + 12.0           # date / description (description content begins
+                                       # 50pt LEFT of its centered header — header midpoint
+                                       # would catch "Sales" on the wrong side)
+b2 = (layout.description.x1 + layout.detail.x0) / 2     # description / detail
+b3 = (layout.detail.x1 + layout.debit.x0) / 2           # detail / debit
+b4 = (layout.debit.x1 + layout.credit.x0) / 2           # debit / credit
+b5 = (layout.credit.x1 + layout.balance.x0) / 2         # credit / balance
+```
+
+**Quirks:**
+
+- **Page-layout inversion** — top-to-bottom in y, page 1 reads: `CLOSING BALANCE` summary → `MOVEMENT TOTALS` summary → reverse-chrono transactions → `BALANCE PERIOD START` opening balance → column headers → account-info footer. The parser detects column headers on each page (returning early if absent), takes the body as everything ABOVE the header band, and walks rows in descending-y order. Continuation rows accumulate into `pending_desc` / `pending_detail` and attach to the next anchor row encountered. Summary rows (matched by the `MOVEMENT` / `CLOSING` / `PERIOD` substring fragments — robust against pypdfium's letter splits) reset the pending lists so they don't leak across the summary boundary.
+- **English number format** (`,` thousands, `.` decimal) — same as BCA/BRI; uses `_parse_amount` directly.
+- **Leading-digit amount split** — a long amount like `99,000,000.00` can arrive as two chunks (a single-digit leading `'9'` and the rest `'9,000,000.00'`) in the Debit column. The amount-column joiner does a NO-SPACE concat, yielding `'99,000,000.00'` which parses correctly.
+- **Per-letter and phantom-token word splits** — pypdfium often renders `Sales Transaction` as `Sales` + `T` + `ransaction`, `JAKARTA` as `JAKAR` + `TA` + `TA`, and `PT. BANK JASA` with a duplicate `T.` phantom (`PT.` + `T. BANK JASA`). The healer (`_heal_letter_splits`) chains a phantom-token deduper (`_dedupe_phantom_tokens` — drops short tokens that prefix the next or suffix the previous) with three regex passes covering single-letter / short-uppercase-token rejoins, iterating until stable.
+- **Holder name** is extracted from the left column, ~9pt below the right-column `No. Rekening` label, using a multi-word all-caps detector that filters out address lines (`JL`, `BLOK`, `RT`, `KEL`, `KOTA`, `INDONESIA`, …).
+- **Bilingual header & label artifacts** — Sinarmas labels carry small render artifacts: a 2-char `'Ta'` chunk often sits next to a full `'Tanggal'` label, an empty `':'` chunk after labels. `_sinarmas_field` filters chunks shorter than 3 characters and picks the longest remaining value chunk on the same baseline.
+
+**Validated against a real Sinarmas Tabungan Payroll Premium statement** (1 month, 1 page, 10 transactions: 6 DB + 4 CR): 10/10 transactions extracted, 0 balance warnings, 0 parse warnings. The parser's per-side sums match the statement's printed `MOVEMENT TOTALS` Debit / Credit cells exactly to the cent. Holder name, account number, periode, and currency all extracted cleanly.
+
 ---
 
 ## 9. Configuration
@@ -854,7 +925,9 @@ The pattern is: validate inputs → call into `pipeline` → translate exception
 | v0.5 | 2026-06-01 | Several themes, broken out below. |
 | v0.6 | 2026-06-01 | **Breaking** — category schema expanded from 4 to 5 categories: `Gaji` (fixed monthly salary), `THR` (Tunjangan Hari Raya — religious-holiday allowance), `Bonus` (any `BONUS_*` label, whether annual or interim), `Insentif` (performance-tied **and work-related allowances**: `INSENTIF`/`INCENTIVE`/`KOMISI`/`COMMISSION`/`ECUTI`/`TUNJANGAN TRANSPORT`/`TUNJANGAN MAKAN`/`TUNJANGAN PULSA`/`TUNJANGAN KELUAR KOTA`/`TUNJANGAN KESEHATAN`/any other `TUNJANGAN <kind>` except Hari Raya), `Lainnya` (other). The old `Tunjangan` catch-all is gone. Both single-PDF and batch prompts rewritten as **explicit label-first decision rules applied in order** — rule 1 routes every `BONUS_*` description to `Bonus`, rule 2 routes THR / `TUNJANGAN HARI RAYA` to `THR`, rule 3 routes every `ECUTI` / `INSENTIF` / `KOMISI` / `COMMISSION` and every work-related `TUNJANGAN <kind>` (transport / makan / pulsa / keluar kota / kesehatan / …) to `Insentif`. Rule order matters: THR sits *before* the generic-tunjangan catchall so `TUNJANGAN HARI RAYA` is routed to `THR`, not `Insentif`. Each LLM-returned reason cites the rule number that fired (e.g. *"BONUS_INTERIM label → Bonus per rule 1"*, *"TUNJANGAN TRANSPORT → Insentif per rule 3"*), making decisions auditable. `CategoryTotal` gains a `min` field (smallest single-tx amount per category; `null` when empty). The `/upload` page renders the min stat in each category's summary row and adds a cyan colour for the Insentif accordion. |
 | v0.7 | 2026-06-01 | **Fixes a real-world miss on bulk-payroll deposits.** Investigating a 12-month BCA account with 301 credits surfaced two stacked issues: (a) the default `LLM_REQUEST_TIMEOUT_S=30` couldn't complete a 300-credit cross-month call, so every credit fell back to `category: null` and bucketed into Lainnya; (b) the user's actual monthly salary arrived via `SMEMFTS` (BCA SME Mass Funds Transfer Service) and `LLG-DEUTSCHE BANK` (Lalu Lintas Giro) channels, which weren't in rule 4's keyword list. **Changes:** (1) Default `LLM_REQUEST_TIMEOUT_S` raised from 30 to 120 seconds (batch internally doubles to 240). `.env.example` updated to 120s. (2) Rule 4 extended with `SMEMFTS` as the primary salary channel. (3) **`LLG-DEUTSCHE BANK` / `LLG ` prefix moved from rule 4 (Gaji) into rule 3 (Insentif)**: in Indonesian corporate practice the LLG channel is used for **allowance** disbursement, not base salary, and is distinct from the main payroll channel. Because rule 3 fires before rule 4, a mixed-label row like `KR OTOMATIS LLG-DEUTSCHE BANK \| PT TUV RHEINLAND` correctly resolves to Insentif (the LLG match wins over the KR OTOMATIS match). (4) Rule 5 (cross-month recurrence) rewritten to key on **sender consistency** rather than amount equality — real salaries vary monthly due to overtime, deductions, prorated months, and bundled THR/bonus, so requiring "same amount" was too restrictive. **Validation:** the BCA 12-month batch went from 0 Gaji detections (timeout) → **15 Gaji** (all 14 SMEMFTS monthly salary deposits + 1 other) + **24 Insentif** (all 22 LLG/Lalu Lintas Giro allowance rows + 2 ECUTI-style rows), at confidence ≥ 0.95, with the LLM citing *"SMEMFTS and PT <X> → Gaji per rule 4"* and *"LLG-DEUTSCHE BANK in description → Insentif per rule 3"* as reasons. The 1 stray `KR OTOMATIS BCA<digits> \| <person name> \| remittance` row stays in Lainnya because it has neither LLG nor a corporate sender — precision preserved. Regression on BCA/Mandiri single-month samples unchanged. |
-| **v0.8** | 2026-06-02 | **Adds professional-fee detection + a hard exclusion list.** Investigating a 3-month BCA account for a self-employed dentist surfaced a new pattern: monthly income arrives as `TRSF E-BANKING CR <ref> \| FEE DOKTER \| <CLINIC PT>` or `\| FEE DRG <name> \| KLINIK CONTOH BSD`. The remarks themselves only say "transfer" — the Gaji signal is the combination of a profession label and a corporate sender. Without an explicit `GAJI`/`PAYROLL`/`SMEMFTS` keyword, the prior prompt missed all of these (8/18 credits, ~Rp 138M/year). **Changes:** (1) Rule 4 gains a third flavour for **professional-fee / honorarium labels** — `FEE DOKTER`, `FEE DRG`, `FEE NOTARIS`, `FEE INSINYUR`, `FEE KONSULTAN`, `FEE PENGACARA`, `FEE [profession]`, `HONOR`, `HONORARIUM`, `JASA <name>`, `RETAINER`. All three flavours now share an explicit requirement: a corporate sender (`PT <X>` / `<X> PT` / `<X> INDO` / `<X> BSD` / `KASTARA <X>` / etc.). (2) **Hard exclusion list** added to rules 4 and 5: descriptions containing `CASHBACK`, `REFUND`, `REIMBURSE`, `REIMBURSEMENT`, `BUNGA` (bank interest), `TAX REFUND`, or `PROMO` always classify as Lainnya, even if other rule-4 keywords match — these are merchant/bank disbursements, not employer payments. This prevents `KR OTOMATIS TRF KOLEKTIF \| CASHBACK QRIS BCA \| DI MERCHANT XYZ` from being misread as Gaji (the apparent corporate "sender" is just a merchant location). (3) Rule 5 (cross-month recurrence) explicitly inherits the same exclusion list. (4) Rule 6 (Lainnya catchall) expanded with concrete personal-sender examples (`BUDI SANTOSO`, `DRG.JOKO HARTONO`, `JONI WIJAYA`) and the Indonesian `hutang` (debt) keyword. **Validation:** the 3-month dentist account produced **8/8 FEE DOKTER + corporate-sender rows correctly Gaji** at confidence ≥ 0.95, **0 false positives** (CASHBACK, BUNGA, `hutang gue` + person name, and peer transfers like `BIF TRANSFER DR \| DRG.JOKO HARTONO` all correctly Lainnya). 17-case synthetic regression covering every prior rule (BONUS_INTERIM, ECUTI, THR_Islam, TUNJANGAN TRANSPORT/MAKAN, SMEMFTS, LLG-DEUTSCHE BANK, …) passes 17/17. |
+| v0.8 | 2026-06-02 | **Adds professional-fee detection + a hard exclusion list.** Investigating a 3-month BCA account for a self-employed dentist surfaced a new pattern: monthly income arrives as `TRSF E-BANKING CR <ref> \| FEE DOKTER \| <CLINIC PT>` or `\| FEE DRG <name> \| KLINIK CONTOH BSD`. The remarks themselves only say "transfer" — the Gaji signal is the combination of a profession label and a corporate sender. Without an explicit `GAJI`/`PAYROLL`/`SMEMFTS` keyword, the prior prompt missed all of these (8/18 credits, ~Rp 138M/year). **Changes:** (1) Rule 4 gains a third flavour for **professional-fee / honorarium labels** — `FEE DOKTER`, `FEE DRG`, `FEE NOTARIS`, `FEE INSINYUR`, `FEE KONSULTAN`, `FEE PENGACARA`, `FEE [profession]`, `HONOR`, `HONORARIUM`, `JASA <name>`, `RETAINER`. All three flavours now share an explicit requirement: a corporate sender (`PT <X>` / `<X> PT` / `<X> INDO` / `<X> BSD` / `KASTARA <X>` / etc.). (2) **Hard exclusion list** added to rules 4 and 5: descriptions containing `CASHBACK`, `REFUND`, `REIMBURSE`, `REIMBURSEMENT`, `BUNGA` (bank interest), `TAX REFUND`, or `PROMO` always classify as Lainnya, even if other rule-4 keywords match — these are merchant/bank disbursements, not employer payments. This prevents `KR OTOMATIS TRF KOLEKTIF \| CASHBACK QRIS BCA \| DI MERCHANT XYZ` from being misread as Gaji (the apparent corporate "sender" is just a merchant location). (3) Rule 5 (cross-month recurrence) explicitly inherits the same exclusion list. (4) Rule 6 (Lainnya catchall) expanded with concrete personal-sender examples (`BUDI SANTOSO`, `DRG.JOKO HARTONO`, `JONI WIJAYA`) and the Indonesian `hutang` (debt) keyword. **Validation:** the 3-month dentist account produced **8/8 FEE DOKTER + corporate-sender rows correctly Gaji** at confidence ≥ 0.95, **0 false positives** (CASHBACK, BUNGA, `hutang gue` + person name, and peer transfers like `BIF TRANSFER DR \| DRG.JOKO HARTONO` all correctly Lainnya). 17-case synthetic regression covering every prior rule (BONUS_INTERIM, ECUTI, THR_Islam, TUNJANGAN TRANSPORT/MAKAN, SMEMFTS, LLG-DEUTSCHE BANK, …) passes 17/17. |
+| v0.9 | 2026-06-03 | **Adds Permata "Rekening Koran" as the fourth supported bank.** A real `dokumentasi_kredit_debitur_mutasi_rekening (1).pdf` (Permata 11-month, 35-page statement) returned `422 UNKNOWN bank layout` — no parser existed. **Changes:** (1) New `parsers/permata.py` (6-column layout: `Tgl Trx. / Tgl Valuta / Uraian Trx. / Debet / Kredit / Saldo`). Permata renders into a ~2000pt-wide coordinate space (vs ~600pt for the other three), so column boundaries and the line-clustering tolerance (`tol_ratio=1.2`) are scale-relative to detected header positions instead of hard-coded. Number format is Indonesian like Mandiri (`.` thousands, `,` decimals) — reuses `_parse_id_amount`. Multi-line `Uraian Trx.` (recipient detail, BIFAST ref, time-of-day, payment ref) is joined with ` \| ` for readability. (2) `detect_bank()` returns `"Permata"` on any of `PERMATABANK.COM`, `PT BANK PERMATA`, or `PERMATABANK` on page 1. (3) `SUPPORTED_BANKS` tuple promoted to a module-level constant in `parsers/__init__.py`; `pipeline.py` error messages now interpolate it instead of carrying the bank list as a string literal (was: *"supported: BCA Rekening Tahapan, BRI BritAma"* — stale since v0.5). (4) `README.md` §1, §7.4, §11.3, §13, §15, §16, and the project-tree diagram updated. **Validation:** the Permata sample produced **310 transactions** (278 DB + 32 CR) across 35 pages with **1 balance warning** (vs typical 0 for the other three banks — a continuation-line edge case worth follow-up but not blocking) and **0 parse warnings**. Holder name extracted cleanly from the "Kepada Yth" block with address-line prefixes (`JL`, `RT`, `KEL`, …) filtered out. Regression on BCA (`contoh_mutasi.pdf`: 317 rows, 8 balance warnings — unchanged) and Mandiri (`sample_mandiri.pdf`: 7 rows, 0 warnings — unchanged). BRI parser unchanged (no live sample available in the tree after the v0.5 PII scrub). |
+| **v0.10** | 2026-06-03 | **Adds Sinarmas "Tabungan" as the fifth supported bank.** A real Sinarmas Tabungan Payroll Premium statement returned `422 UNKNOWN bank layout`. Sinarmas's layout is the most unusual of the supported banks — the visual structure on every page is INVERTED relative to BCA/BRI/Mandiri/Permata. **Changes:** (1) New `parsers/sinarmas.py` with full handling for: (a) the page-level inversion (period-summary rows ABOVE the body, column headers BELOW, account-info footer at the very bottom); (b) reverse-chronological order WITHIN the body — rows are collected in source order then reversed so the response stays forward-chronological; (c) anchor-at-the-bottom block layout — each transaction's date+amount+balance row sits at the LOWEST y of its visual block, with continuation lines (counterparty bank, counterparty account number, QR-merchant code, branch suffix) ABOVE it. The parser accumulates continuations as it descends and attaches them to the next anchor below. (2) **Leading-digit chunk split handling** — long debit amounts can render as a single leading digit chunk plus the rest; the amount-column joiner uses NO-SPACE concat to merge them before parsing. (3) **Per-letter and phantom-token healers** for pypdfium splits like `Sales` + `T` + `ransaction`, `JAKAR` + `TA` + `TA`, `PT.` + `T. BANK <X>`. A phantom-token deduper (`_dedupe_phantom_tokens`) drops short tokens that prefix the next or suffix the previous, then three regex passes rejoin single-letter / short-uppercase-token splits, iterating until stable. (4) **Summary-row detection via substring fragments** (`MOVEMENT` / `CLOSING` / `PERIOD`) so the test runs on a whitespace-stripped form — robust against the pypdfium letter splits that fragment `MOVEMENT TOTALS` into `MOVEMENT T OTA TALS` etc. (5) `detect_bank()` returns `"Sinarmas"` on `SINARMAS` or `BANK SINARMAS` on page 1. (6) `SUPPORTED_BANKS` tuple, `pipeline.py` error message, README.md (§1, §7.5, §15, §16, project-tree, troubleshooting), and `architecture.md` (§3, §8.5, change log) all updated. **Validation:** the Sinarmas sample produced **10 transactions** (6 DB + 4 CR), **0 balance warnings, 0 parse warnings**, and per-side debit/credit sums matching the statement's printed `MOVEMENT TOTALS` rows to the cent. Holder name, account number, periode, and currency extracted cleanly. Regression on BCA, Mandiri, Permata unchanged. |
 
 **v0.5 in detail:**
 

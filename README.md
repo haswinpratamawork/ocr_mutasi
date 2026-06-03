@@ -2,12 +2,14 @@
 
 > Backend service that extracts transactions from Indonesian bank-statement PDFs and uses an LLM to classify each *credit* transaction as **Gaji** (fixed monthly salary), **THR** (religious-holiday allowance), **Bonus** (any `BONUS_*` label, annual or interim), **Insentif** (performance pay and work-related `TUNJANGAN <kind>` allowances), or **Lainnya** (other).
 
-**Current version:** v0.8 — three supported banks, 5-category classifier (Gaji / THR / Bonus / Insentif / Lainnya), batch endpoint with cross-month classification, in-browser upload page, per-category `min` stat. v0.8 adds professional-fee detection (`FEE DOKTER`, `FEE DRG`, `HONOR`, `HONORARIUM`, `JASA`, `RETAINER` + corporate sender → Gaji), plus a hard exclusion list (`CASHBACK`, `REFUND`, `BUNGA`, `PROMO` → always Lainnya). See the change log in [architecture.md §19](docs/architecture.md#19-change-log).
+**Current version:** v0.10 — five supported banks, 5-category classifier (Gaji / THR / Bonus / Insentif / Lainnya), batch endpoint with cross-month classification, in-browser upload page, per-category `min` stat. v0.10 adds the Sinarmas "Tabungan" parser (6 bilingual columns; summary rows ABOVE the body; reverse-chronological order within the body; anchor at the BOTTOM of each visual block). See the change log in [architecture.md §19](docs/architecture.md#19-change-log).
 
 **Supported banks** (auto-detected from page 1 — no client flag needed):
 - **BCA "Rekening Tahapan"** — 5-column layout, `DB` suffix marks debits.
 - **BRI "BritAma"** — 6-column bilingual layout with separate Debet / Kredit columns.
 - **Mandiri "Tabungan Mandiri" e-Statement** — 5-column bilingual layout, `+`/`-` prefix on the Nominal column signals credit/debit, Indonesian number format (`.` thousands, `,` decimals).
+- **Permata "Rekening Koran"** — 6-column layout (Tgl Trx. / Tgl Valuta / Uraian Trx. / Debet / Kredit / Saldo), Indonesian number format like Mandiri, much wider page space than the other three (~2000pt vs ~600pt), holder name anchored to the "Kepada Yth" block.
+- **Sinarmas "Tabungan"** — 6 bilingual columns (Date/Tanggal, Description/Keterangan, Detail, Debit/Debet, Credit/Kredit, Balance/Saldo). Layout is inverted vs the other four: period-summary rows (CLOSING BALANCE, MOVEMENT TOTALS) sit ABOVE the transaction body, column headers sit BELOW it, and rows are in reverse-chronological order with the anchor row (date + amount + balance) at the BOTTOM of each block. The parser walks rows top-to-bottom and reverses the result so the response stays forward-chronological. English number format.
 
 **Two ways to test it:**
 1. **Browser** — open <http://localhost:8000/upload>, pick one or many PDFs (multi-select via Cmd/Ctrl-click), get an accordion of classified credits.
@@ -181,7 +183,7 @@ AZURE_OPENAI_DEPLOYMENT=gpt-4.1-mini
 **The repo does not ship any bank-statement PDFs** — they're personal financial data and excluded via `.gitignore` (see [§17 below](#17-data-privacy--samples)). To exercise the smoke tests and the upload page, drop one of your own into the project root:
 
 ```bash
-# pick any BCA "Rekening Tahapan", BRI "BritAma", or Mandiri "Tabungan Mandiri" e-Statement PDF
+# pick any BCA "Rekening Tahapan", BRI "BritAma", Mandiri "Tabungan Mandiri", Permata "Rekening Koran", or Sinarmas "Tabungan" PDF
 cp ~/Downloads/your_statement.pdf ./sample.pdf
 ```
 
@@ -393,7 +395,7 @@ Examples:
 | `400` | `{"detail": "Upload must be a PDF."}` |
 | `413` | `{"detail": "'Mutasi_April_2026.pdf': exceeds 20000000 bytes"}` |
 | `422` | `{"detail": "Could not read PDF: Failed to load document (PDFium: Data format error)."}` |
-| `422` | `{"detail": "PDF doesn't match any known bank layout (supported: BCA Rekening Tahapan, BRI BritAma)."}` |
+| `422` | `{"detail": "PDF doesn't match any known bank layout (supported: BCA Rekening Tahapan, BRI BritAma, Mandiri Tabungan, Permata Rekening Koran, Sinarmas Tabungan)."}` |
 | `422` | `{"detail": "No transactions detected — is this a supported bank PDF?"}` |
 | `500` | `{"detail": "Internal error while parsing PDF"}` |
 
@@ -529,6 +531,27 @@ The `200 OK` response always includes an `audit` block. Even on a successful res
 - **Multi-line transactions:** each transaction spans 3–5 visual lines (main label, date, anchor line with No+values, time, optional description continuation). The grouper packs consecutive lines within ~18 pt vertical gap into one transaction.
 - **Account name in the header** may be split across two chunks (`BUDI` on one line, `SANTOSO` on the next) — the field extractor concatenates them.
 
+### 7.4 Permata "Rekening Koran"
+
+- **Detection tokens:** `PERMATABANK.COM`, `PT BANK PERMATA`, or `PERMATABANK` on page 1 (the URL/phone block is the cleanest disambiguator; the title "Rekening Koran" alone could collide with other banks' future statements).
+- **Columns:** `Tgl Trx. / Tgl Valuta / Uraian Trx. / Debet / Kredit / Saldo` (6 columns — same shape as BRI but using Indonesian-format numbers).
+- **Page scale is ~3× larger** than BCA/BRI/Mandiri: Permata renders into a ~2000pt-wide coordinate space (vs ~600pt for the others). The line-clustering tolerance and column-boundary heuristics in `parsers/permata.py` are scale-relative, not hard-coded constants.
+- **Number format:** Indonesian, like Mandiri (`.` thousands, `,` decimals; e.g. `6.000.000,00`). Uses the shared `_parse_id_amount` helper.
+- **Debit vs credit:** **two separate columns**, like BRI — the unused one is blank rather than `0.00`. `type` is set from whichever column has a value.
+- **Multi-line `Uraian Trx.`** is the norm: most rows carry 2–4 continuation lines (recipient detail, BIFAST reference, time-of-day, payment reference number). The grouper joins them with ` | ` so they read naturally.
+- **Holder name** is extracted from the "Kepada Yth" address block on page 1, filtering out lines that look like a street address (e.g. starting with `JL`, `RT`, `KEL`, `KEC`, postal codes).
+
+### 7.5 Sinarmas "Tabungan"
+
+- **Detection tokens:** `SINARMAS` or `BANK SINARMAS` on page 1.
+- **Columns (six, bilingual):** `Date / Tanggal`, `Description / Keterangan`, `Detail` (counterparty), `Debit / Debet`, `Credit / Kredit`, `Balance / Saldo`. English label is the upper line, Indonesian the lower.
+- **Page layout is inverted vs every other supported bank:** period-summary rows (`CLOSING BALANCE`, `MOVEMENT TOTALS`) sit ABOVE the transaction body; column headers sit BELOW the body; the account-info block (period, holder name, account no., currency, category) sits at the very bottom of page 1.
+- **Reverse-chronological order WITHIN the body:** the most recent transaction is at the top; the opening balance (`BALANCE PERIOD START`) is at the bottom. The parser collects rows in source order then REVERSES the result so the response stays forward-chronological like every other bank.
+- **Block anchor is at the BOTTOM:** each transaction's anchor row (date + amount + balance) sits at the LOWEST y of its visual block; continuation lines (counterparty bank, counterparty account number, QR-merchant code, branch suffix) sit ABOVE it. We accumulate continuations as we descend and attach them to the next anchor below.
+- **English number format** (`,` thousands, `.` decimals) — same as BCA/BRI.
+- **Leading-digit chunk split:** long debit amounts can render as a single leading digit chunk plus the rest, e.g. a leading `9` chunk followed by `9,000,000.00` → `99,000,000.00`. The amount-column joiner uses NO-SPACE concat so they merge cleanly before parsing.
+- **Per-letter / phantom-token splits:** pypdfium renders some words across multiple chunks (`Sales` + `T` + `ransaction`, `JAKAR` + `TA` + `TA`, `PT.` + `T. BANK JASA`). A dedicated healer (`_heal_letter_splits` + `_dedupe_phantom_tokens`) deduplicates phantom tokens and rejoins single-letter splits so the description column reads cleanly downstream.
+
 For exact column boundary calibration and gotchas per bank, see [architecture §8](docs/architecture.md#8-per-bank-layout-reference).
 
 ---
@@ -623,7 +646,9 @@ ocr_mutasi/                          ← project root
 │   │   ├── common.py                ← shared helpers + generic Row
 │   │   ├── bca.py                   ← BCA Rekening Tahapan
 │   │   ├── bri.py                   ← BRI BritAma
-│   │   └── mandiri.py               ← Mandiri Tabungan e-Statement
+│   │   ├── mandiri.py               ← Mandiri Tabungan e-Statement
+│   │   ├── permata.py               ← Permata Rekening Koran
+│   │   └── sinarmas.py              ← Sinarmas Tabungan
 │   ├── llm_classifier.py            ← Azure OpenAI: single + batch
 │   ├── pipeline.py                  ← run() + run_batch() + UnsupportedBankError
 │   └── api.py                       ← FastAPI app
@@ -770,7 +795,7 @@ All settings are read from `.env` once at startup (singleton via `pydantic-setti
 | Symptom | HTTP | Likely cause | What to do |
 |---|---|---|---|
 | `Could not read PDF: Failed to load document (PDFium: Data format error)` | 422 | Truncated, corrupt, or not a PDF | Confirm the file opens in a PDF viewer; re-upload |
-| `PDF doesn't match any known bank layout` | 422 | Not BCA Rekening Tahapan, BRI BritAma, or Mandiri Tabungan e-Statement | Confirm the bank/product on page 1. If it's a new bank, add a parser (see §11.3 / [architecture §17.1](docs/architecture.md#171-adding-a-new-bank)). |
+| `PDF doesn't match any known bank layout` | 422 | Not BCA Rekening Tahapan, BRI BritAma, Mandiri Tabungan e-Statement, Permata Rekening Koran, or Sinarmas Tabungan | Confirm the bank/product on page 1. If it's a new bank, add a parser (see §11.3 / [architecture §17.1](docs/architecture.md#171-adding-a-new-bank)). |
 | `No transactions detected — is this a supported bank PDF?` | 422 | Header detected but body empty (e.g. statement is a cover page only) | Inspect the PDF; use §11.4 to dump raw chunks. |
 | `account.nama` is `null` (but other fields populated) | 200 | The bank's header anchor (e.g. BCA `KCP <branch>`) doesn't match a variant on your statement | Run §11.4 against the upper-left and share the chunk dump; we'll extend the prefix list. |
 | Mandiri amount comes out 1000× too small or as a date | 200 | Mandiri uses `.` thousands and `,` decimals (inverted vs BCA/BRI). If this regresses, the `_parse_id_amount` helper in `parsers/mandiri.py` is broken — bisect from there. | — |
@@ -795,8 +820,8 @@ All settings are read from `.env` once at startup (singleton via `pydantic-setti
 **Q. Why is the project named "ocr_mutasi" if it doesn't do OCR?**
 History. The first design called for PaddleOCR; we then discovered the source PDFs are digital with clean text layers and pivoted to direct text extraction. The name stuck. See [architecture §1](docs/architecture.md#1-overview).
 
-**Q. Can I add another bank (BNI / CIMB / Permata / …)?**
-Yes — Mandiri was added in v0.5 as a one-file change and that established the pattern. See §11.3 and [architecture §17](docs/architecture.md#17-extending-the-system).
+**Q. Can I add another bank (BNI / CIMB / …)?**
+Yes — Mandiri (v0.5), Permata (v0.9), and Sinarmas (v0.10) were each one-file changes. See §11.3 and [architecture §17](docs/architecture.md#17-extending-the-system) for the pattern.
 
 **Q. Do scanned PDFs work?**
 No. If your inputs are photographs or scans without a text layer, this service won't work. Adding OCR fallback (PaddleOCR / Tesseract) is on the roadmap but not implemented in v1.
@@ -835,7 +860,7 @@ Because Swagger UI **cannot** render a single multi-file input (`<input type="fi
 
 ## 15. Limitations
 
-- **Supported banks:** BCA Rekening Tahapan, BRI BritAma, and Mandiri Tabungan e-Statement. Other layouts return `422`.
+- **Supported banks:** BCA Rekening Tahapan, BRI BritAma, Mandiri Tabungan e-Statement, Permata Rekening Koran, and Sinarmas Tabungan. Other layouts return `422`.
 - **Digital PDFs only:** scanned PDFs (no text layer) return `422`. No OCR fallback in v1.
 - **Use `/extract-batch` for a year of statements:** single-PDF classification cannot see cross-month recurrence — the dominant Gaji signal.
 - **No persistence:** results are returned in the response and not stored.
@@ -849,7 +874,7 @@ Because Swagger UI **cannot** render a single multi-file input (`<input type="fi
 See [architecture §18](docs/architecture.md#18-open-questions--future-work) for the design-side roadmap. The short list, in priority order:
 
 1. **Auth & rate limiting** when this leaves the internal network.
-2. **More banks** — BNI, CIMB, Permata (each is a one-file change, see §11.3).
+2. **More banks** — BNI, CIMB, Danamon (each is a one-file change, see §11.3).
 3. **Confidence-based human review** — surface low-confidence classifications in the UI.
 4. **Multi-account merging** — if a user has BCA + BRI + Mandiri accounts, cross-bank recurrence is an even stronger Gaji signal.
 5. **Scanned-PDF fallback** via PaddleOCR (opt-in).

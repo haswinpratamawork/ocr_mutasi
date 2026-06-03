@@ -21,7 +21,7 @@ from .models import (
     ExtractionResponse,
     FileExtraction,
 )
-from .parsers import detect_bank, get_parser
+from .parsers import SUPPORTED_BANKS, detect_bank, get_parser
 from .pdf_extractor import extract_chunks
 
 
@@ -45,7 +45,7 @@ def run(
     bank = detect_bank(chunks)
     if bank == "UNKNOWN":
         raise UnsupportedBankError(
-            "PDF doesn't match any known bank layout (supported: BCA Rekening Tahapan, BRI BritAma)."
+            "PDF doesn't match any known bank layout (supported: BCA Rekening Tahapan, BRI BritAma, Mandiri Tabungan, Permata Rekening Koran, Sinarmas Tabungan)."
         )
     parser = get_parser(bank)
 
@@ -88,7 +88,7 @@ def _extract_one(
     if bank == "UNKNOWN":
         raise UnsupportedBankError(
             f"{filename}: PDF doesn't match any known bank layout "
-            "(supported: BCA Rekening Tahapan, BRI BritAma)."
+            "(supported: BCA Rekening Tahapan, BRI BritAma, Mandiri Tabungan, Permata Rekening Koran, Sinarmas Tabungan)."
         )
     parser = get_parser(bank)
     account = parser.parse_header(chunks)
