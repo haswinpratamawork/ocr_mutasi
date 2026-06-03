@@ -27,6 +27,11 @@ class ParsedSlip(BaseModel):
     incentive: float = 0.0
     deduction: float = 0.0
     other_deduction: float = 0.0
+    period: Optional[str] = Field(
+        None,
+        description="YYYY-MM emitted by ocr_slip from the slip's 'Period:' line. "
+                    "When present, takes precedence over filename-month parsing.",
+    )
     confidence_notes: list[str] = Field(default_factory=list)
     extraction_method: str = ""
     month: Optional[str] = Field(None, description="YYYY-MM, derived in pipeline")
@@ -62,7 +67,12 @@ class MatchPair(BaseModel):
     amount_diff_pct: float = Field(..., description="amount_diff_rp / slip.total_paid; signed")
     days_off: int = Field(0, description="day-of-month of the credit's tanggal")
     match_pattern: str = Field(
-        ..., description="'next_month' (slip month X paid in bank month X+1) or 'same_month'"
+        ...,
+        description="Which preference tier produced the pairing. "
+                    "'next_month' = slip month X paid in bank month X+1 (Indonesian default); "
+                    "'same_month' = paid in slip's own month X; "
+                    "'future_month' = paid 2–3 months after the slip (delayed payroll); "
+                    "'amount_only' = matched on amount alone, slip carried no period info.",
     )
 
 

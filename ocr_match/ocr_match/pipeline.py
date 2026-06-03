@@ -56,12 +56,20 @@ _MONTH_NAME_RE = re.compile(
 
 
 def _slip_month(slip: ParsedSlip) -> Optional[str]:
-    """Best-effort YYYY-MM extraction from a slip filename.
+    """Best-effort YYYY-MM extraction for a slip.
 
-    Looks for patterns like ``Feb 2025``, ``Februari_2025``, ``Apr 2025``,
-    ``2025-04``. Returns None when nothing matches — those slips will land
-    in ``unmatched_slips`` because no month bucket can accept them.
+    Source-of-truth ordering:
+      1. ``slip.period`` (emitted by ocr_slip from the slip's ``Period:`` /
+         ``Periode:`` line) — most reliable because it comes from the slip's
+         own content.
+      2. ``slip.source_file`` — patterns like ``Feb 2025``, ``Februari_2025``,
+         ``Apr 2025``, or ``2025-04`` anywhere in the filename.
+
+    Returns ``None`` when nothing matches — the matcher then falls back to
+    a cross-month amount-only search (see ``matcher.match_all``).
     """
+    if slip.period:
+        return slip.period
     name = slip.source_file or ""
     m = _MONTH_NAME_RE.search(name)
     if m:
