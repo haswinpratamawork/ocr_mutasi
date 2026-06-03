@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Salary Slip Extractor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <main class="page">
+      <section class="panel">
+        <header class="header">
+          <h1>Salary Slip Extractor</h1>
+          <p>Upload PDF salary slips and download the extracted JSON.</p>
+        </header>
+
+        <form id="uploadForm" class="dropzone">
+          <input id="fileInput" name="files" type="file" accept="application/pdf,.pdf" multiple>
+          <div class="upload-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img">
+              <path d="M12 3v12m0-12 4 4m-4-4-4 4M5 15v3a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-3"/>
+            </svg>
+          </div>
+          <h2>Drop PDFs here</h2>
+          <p>or click to choose files</p>
+        </form>
+
+        <div id="fileList" class="file-list"></div>
+
+        <div class="action-row">
+          <button id="extractBtn" class="primary-button" type="button" disabled>Extract</button>
+          <span id="statusText" class="status">No files selected</span>
+        </div>
+
+        <section id="results" class="results hidden">
+          <div class="totals">
+            <div>
+              <span>Files</span>
+              <strong id="docCount">0</strong>
+            </div>
+            <div>
+              <span>Total Paid</span>
+              <strong id="paidTotal">-</strong>
+            </div>
+            <div>
+              <span>Incentive</span>
+              <strong id="incentiveTotal">-</strong>
+            </div>
+            <div>
+              <span>Cutoff</span>
+              <strong id="cutoffTotal">-</strong>
+            </div>
+          </div>
+
+          <div class="json-actions">
+            <button id="showSummaryBtn" class="secondary-button" type="button">Show Summary JSON</button>
+            <button id="showRawBtn" class="secondary-button" type="button">Show Raw JSON</button>
+            <a id="summaryDownload" class="text-link" href="#">Download summary</a>
+            <a id="extractedDownload" class="text-link" href="#">Download raw</a>
+          </div>
+
+          <pre id="jsonPreview" class="json-preview hidden"></pre>
+
+          <section class="threshold-section">
+            <h2>Threshold Progress</h2>
+            <div id="thresholdCards" class="threshold-cards"></div>
+          </section>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>Worker</th>
+                  <th>Institution</th>
+                  <th>Paid</th>
+                </tr>
+              </thead>
+              <tbody id="resultRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

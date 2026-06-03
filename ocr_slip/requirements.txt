@@ -1,0 +1,8 @@
+fastapi>=0.115.0
+Flask>=3.0.0
+pyobjc-framework-Quartz>=12.2; sys_platform == "darwin"
+pyobjc-framework-Vision>=12.2; sys_platform == "darwin"
+pypdfium2>=4.30.0
+python-multipart>=0.0.9
+requests>=2.32.0
+uvicorn>=0.30.0
