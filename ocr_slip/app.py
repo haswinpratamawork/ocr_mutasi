@@ -162,17 +162,22 @@ async def parse_salary_slips(
 # free-form Bulan Tahun string on some slips).
 
 def _document_compat(d: dict[str, Any]) -> dict[str, Any]:
-    """Project one ``summary.dokumen[*]`` entry to the legacy English keys."""
+    """Project one ``summary.dokumen[*]`` entry to the legacy English keys.
+
+    Note: the rework collapses ``tax`` and ``other_deduction`` into a single
+    ``potongan`` (deduction) field — ``extract_llm.py`` documents this as
+    *"deduction = all decreases combined into one number, including PPh/
+    pajak/tax and any other deduction"*. The old vendored shape had separate
+    tax and other_deduction fields; we no longer emit them.
+    """
     return {
         "source_file":        d.get("sumber_file"),
         "worker_name":        d.get("nama_pekerja"),
         "institution_name":   d.get("nama_institusi"),
         "total_paid":         _num(d.get("total_dibayar")),
         "pokok":              _num(d.get("gaji_pokok")) or 0,
-        "tax":                _num(d.get("pajak")) or 0,
         "incentive":          _num(d.get("tunjangan")) or 0,
         "deduction":          _num(d.get("potongan")) or 0,
-        "other_deduction":    _num(d.get("potongan_lain")) or 0,
         "period":             d.get("tanggal_periode"),
         "extraction_method":  d.get("metode_ekstraksi") or "",
         "confidence_notes":   list(d.get("catatan") or []),
@@ -180,15 +185,18 @@ def _document_compat(d: dict[str, Any]) -> dict[str, Any]:
 
 
 def _totals_compat(totals_id: dict[str, Any] | None) -> dict[str, Any]:
-    """Project ``summary.periode.total`` back to the legacy English keys."""
+    """Project ``summary.periode.total`` back to the legacy English keys.
+
+    Same caveat as ``_document_compat``: aggregate ``tax`` / ``other_deduction``
+    were dropped in the rework; the rework's single ``potongan`` total now
+    encompasses both.
+    """
     t = totals_id or {}
     return {
         "total_paid":      _num(t.get("total_dibayar")) or 0,
         "pokok":           _num(t.get("gaji_pokok")) or 0,
-        "tax":             _num(t.get("pajak")) or 0,
         "incentive":       _num(t.get("tunjangan")) or 0,
         "deduction":       _num(t.get("potongan")) or 0,
-        "other_deduction": _num(t.get("potongan_lain")) or 0,
     }
 
 
@@ -311,7 +319,7 @@ _UPLOAD_PAGE = """<!doctype html>
 <body>
   <div class="container">
     <h1>Salary Slip Parser — Upload</h1>
-    <p class="tagline">Drop one or more salary-slip PDFs and get back the parsed worker, institution, take-home pay, and a pokok / tax / incentive / deduction breakdown. Multi-select with <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>-click. &nbsp;·&nbsp; <a href="/docs">Swagger UI</a> &nbsp;·&nbsp; <a href="/redoc">ReDoc</a></p>
+    <p class="tagline">Drop one or more salary-slip PDFs and get back the parsed worker, institution, take-home pay, and a pokok / incentive / deduction breakdown. Multi-select with <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>-click. &nbsp;·&nbsp; <a href="/docs">Swagger UI</a> &nbsp;·&nbsp; <a href="/redoc">ReDoc</a></p>
 
     <form id="form" class="card">
       <label for="files" class="file-drop" id="drop">
@@ -451,9 +459,7 @@ function renderTotals(data) {
     ['take-home', 'Take-home (sum)', t.total_paid],
     ['',          'Pokok (sum)',     t.pokok],
     ['',          'Incentive (sum)', t.incentive],
-    ['',          'Tax (sum)',       t.tax],
     ['',          'Deduction (sum)', t.deduction],
-    ['',          'Other (sum)',     t.other_deduction],
   ];
   totals.innerHTML = `
     <div class="card">
@@ -495,9 +501,7 @@ function renderDocs(data) {
           <tbody>
             <tr><td>Pokok (basic salary)</td><td>${fmtRp(d.pokok)}</td></tr>
             <tr><td>Incentive / tunjangan</td><td>${fmtRp(d.incentive)}</td></tr>
-            <tr><td>Tax (PPh / withholding)</td><td>${fmtRp(d.tax)}</td></tr>
-            <tr><td>Deduction</td><td>${fmtRp(d.deduction)}</td></tr>
-            <tr><td>Other cut-offs</td><td>${fmtRp(d.other_deduction)}</td></tr>
+            <tr><td>Deduction <span class="hint">(incl. tax)</span></td><td>${fmtRp(d.deduction)}</td></tr>
           </tbody>
         </table>
         ${notes.length ? `
