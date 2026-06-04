@@ -8,8 +8,6 @@ the pypdfium2 extraction layer.
 
 from __future__ import annotations
 
-import argparse
-from io import BytesIO
 import json
 import re
 from collections import deque
@@ -28,6 +26,23 @@ MONEY_RE = re.compile(
 LABEL_PREFIX_RE = re.compile(r"^(?:[\s\-•*–—]+|\d{3,5}\s+|TOTAL\.[A-Z]+\s+)")
 
 
+class PdfPasswordError(RuntimeError):
+    """Raised when a PDF cannot be opened without a valid password."""
+
+
+def open_pdf_document(pdf_path: Path, password: str | None = None) -> pdfium.PdfDocument:
+    """Open a PDF and normalize password-related errors."""
+
+    try:
+        return pdfium.PdfDocument(pdf_path, password=password)
+    except pdfium.PdfiumError as exc:
+        message = str(exc)
+        lowered = message.casefold()
+        if any(keyword in lowered for keyword in ("password", "encrypted", "security", "protected")):
+            raise PdfPasswordError(f"{pdf_path.name} is password protected or the password is incorrect.") from exc
+        raise
+
+
 @dataclass(frozen=True)
 class ParserConfig:
     """Keywords used by the inference layer.
@@ -40,6 +55,8 @@ class ParserConfig:
     company_contribution_sections: tuple[str, ...] = (
         "kontribusi perusahaan",
         "employer contribution",
+        "non cash benefit",
+        "benefit tidak tunai",
     )
     deduction_sections: tuple[str, ...] = ("potongan", "deduction", "deductions")
     total_keywords: tuple[str, ...] = ("total", "jumlah")
@@ -53,6 +70,9 @@ class ParserConfig:
         "diterima",
         "bersih",
         "neto",
+        "bruto",
+        "total penghasilan bruto",
+        "penghasilan bruto",
         "take-home",
         "take home",
     )
@@ -168,11 +188,6 @@ class SalarySummary:
     incentive_total: int | float
     tax_cutoff_total: int | float
     other_cutoff_total: int | float
-    period: str | None = None
-    """Pay period as YYYY-MM (e.g. ``2026-02``) when found on the slip — derived
-    from a ``Period:`` / ``Periode:`` line carrying a month + year. Used by the
-    ocr_match matcher to align slip month X with the bank credit's month.
-    """
     earnings: list[LineItem] = field(default_factory=list)
     incentives: list[LineItem] = field(default_factory=list)
     deductions: list[LineItem] = field(default_factory=list)
@@ -257,24 +272,27 @@ def amount_at_line_end(line: str) -> tuple[str, int | float] | None:
 class PdfTextExtractor:
     """Extract raw text from PDFs with pypdfium2."""
 
-    def extract(self, pdf_path: Path) -> dict[str, Any]:
-        document = pdfium.PdfDocument(pdf_path)
+    def extract(self, pdf_path: Path, password: str | None = None) -> dict[str, Any]:
+        document = open_pdf_document(pdf_path, password=password)
         pages: list[dict[str, Any]] = []
 
-        for page_index, page in enumerate(document):
-            text_page = page.get_textpage()
-            text = text_page.get_text_range()
-            lines = [normalize_space(line) for line in text.splitlines() if normalize_space(line)]
-            pages.append(
-                {
-                    "page_number": page_index + 1,
-                    "char_count": len(text),
-                    "text": text,
-                    "lines": lines,
-                }
-            )
-            text_page.close()
-            page.close()
+        try:
+            for page_index, page in enumerate(document):
+                text_page = page.get_textpage()
+                text = text_page.get_text_range()
+                lines = [normalize_space(line) for line in text.splitlines() if normalize_space(line)]
+                pages.append(
+                    {
+                        "page_number": page_index + 1,
+                        "char_count": len(text),
+                        "text": text,
+                        "lines": lines,
+                    }
+                )
+                text_page.close()
+                page.close()
+        finally:
+            document.close()
 
         return {
             "source_file": str(pdf_path),
@@ -314,107 +332,6 @@ def text_quality_needs_ocr(extracted: dict[str, Any], config: ParserConfig | Non
     )
 
 
-class MacVisionOcrExtractor:
-    """OCR PDF pages with Apple's local Vision framework on macOS."""
-
-    def __init__(self, scale: float = 2.5) -> None:
-        self.scale = scale
-
-    def extract(self, pdf_path: Path) -> dict[str, Any]:
-        try:
-            import Foundation
-            import Quartz
-            import Vision
-        except Exception as exc:
-            raise RuntimeError(
-                "OCR fallback requires pyobjc-framework-Vision and pyobjc-framework-Quartz."
-            ) from exc
-
-        document = pdfium.PdfDocument(pdf_path)
-        pages: list[dict[str, Any]] = []
-
-        for page_index, page in enumerate(document):
-            image = page.render(scale=self.scale).to_pil()
-            buffer = BytesIO()
-            image.save(buffer, format="PNG")
-            image_bytes = buffer.getvalue()
-
-            ns_data = Foundation.NSData.dataWithBytes_length_(image_bytes, len(image_bytes))
-            source = Quartz.CGImageSourceCreateWithData(ns_data, None)
-            cg_image = Quartz.CGImageSourceCreateImageAtIndex(source, 0, None)
-            recognized_lines: list[str] = []
-
-            def completion_handler(request, error):
-                if error:
-                    return
-                for observation in request.results():
-                    candidates = observation.topCandidates_(1)
-                    if candidates:
-                        recognized_lines.append(str(candidates[0].string()))
-
-            request = Vision.VNRecognizeTextRequest.alloc().initWithCompletionHandler_(
-                completion_handler
-            )
-            request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
-            request.setUsesLanguageCorrection_(True)
-            handler = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(cg_image, {})
-            ok, error = handler.performRequests_error_([request], None)
-            if not ok:
-                raise RuntimeError(f"OCR failed on page {page_index + 1}: {error}")
-
-            lines = [normalize_space(line) for line in recognized_lines if normalize_space(line)]
-            text = "\n".join(lines)
-            pages.append(
-                {
-                    "page_number": page_index + 1,
-                    "char_count": len(text),
-                    "text": text,
-                    "lines": lines,
-                }
-            )
-            page.close()
-
-        return {
-            "source_file": str(pdf_path),
-            "extracted_at": datetime.now(timezone.utc).isoformat(),
-            "extraction_method": "ocr_apple_vision",
-            "page_count": len(pages),
-            "pages": pages,
-            "warnings": ["OCR fallback used via Apple Vision."],
-        }
-
-
-class AutoOcrPdfTextExtractor:
-    """Use PDF text when good enough, otherwise run local OCR fallback."""
-
-    def __init__(self, config: ParserConfig | None = None, ocr_mode: str = "auto") -> None:
-        self.config = config or ParserConfig()
-        self.ocr_mode = ocr_mode
-        self.pdf_text_extractor = PdfTextExtractor()
-        self.ocr_extractor = MacVisionOcrExtractor()
-
-    def extract(self, pdf_path: Path) -> dict[str, Any]:
-        native = self.pdf_text_extractor.extract(pdf_path)
-        use_ocr = self.ocr_mode == "always" or (
-            self.ocr_mode == "auto" and text_quality_needs_ocr(native, self.config)
-        )
-        if self.ocr_mode == "never" or not use_ocr:
-            return native
-
-        try:
-            ocr = self.ocr_extractor.extract(pdf_path)
-        except Exception as exc:
-            native["warnings"].append(f"OCR fallback failed: {exc}")
-            return native
-
-        ocr["native_text_metrics"] = {
-            "total_chars": sum(page["char_count"] for page in native["pages"]),
-            "non_empty_lines": sum(len(page["lines"]) for page in native["pages"]),
-            "warnings": native["warnings"],
-        }
-        return ocr
-
-
 class SalarySlipAnalyzer:
     """Infer payroll fields from extracted text."""
 
@@ -435,7 +352,7 @@ class SalarySlipAnalyzer:
         other_cutoffs = [item for item in deductions if item not in tax_cutoffs]
 
         gross_income_total = self._find_total(items, "earnings")
-        deduction_total = self._find_total(items, "deductions")
+        deduction_total = self._positive_money(self._find_total(items, "deductions"))
         paid_salary_total = self._find_net_pay(lines, gross_income_total, deduction_total)
 
         notes: list[str] = []
@@ -455,9 +372,8 @@ class SalarySlipAnalyzer:
             gross_income_total=gross_income_total,
             deduction_total=deduction_total,
             incentive_total=sum(item.amount for item in incentives),
-            tax_cutoff_total=sum(item.amount for item in tax_cutoffs),
-            other_cutoff_total=sum(item.amount for item in other_cutoffs),
-            period=self._find_period(lines),
+            tax_cutoff_total=sum(abs(item.amount) for item in tax_cutoffs),
+            other_cutoff_total=sum(abs(item.amount) for item in other_cutoffs),
             earnings=earnings,
             incentives=incentives,
             deductions=deductions,
@@ -466,68 +382,6 @@ class SalarySlipAnalyzer:
             company_contributions=contributions,
             confidence_notes=notes,
         )
-
-    # English short-form, English long-form, and Indonesian month names — all
-    # forms commonly seen on Indonesian payroll slips.
-    _PERIOD_MONTHS = {
-        "JAN": 1, "JANUARY": 1, "JANUARI": 1,
-        "FEB": 2, "FEBRUARY": 2, "FEBRUARI": 2,
-        "MAR": 3, "MARCH": 3, "MARET": 3,
-        "APR": 4, "APRIL": 4,
-        "MAY": 5, "MEI": 5,
-        "JUN": 6, "JUNE": 6, "JUNI": 6,
-        "JUL": 7, "JULY": 7, "JULI": 7,
-        "AUG": 8, "AUGUST": 8, "AGT": 8, "AGUSTUS": 8, "AGU": 8,
-        "SEP": 9, "SEPT": 9, "SEPTEMBER": 9,
-        "OCT": 10, "OCTOBER": 10, "OKT": 10, "OKTOBER": 10,
-        "NOV": 11, "NOVEMBER": 11,
-        "DEC": 12, "DECEMBER": 12, "DES": 12, "DESEMBER": 12,
-    }
-
-    _PERIOD_LABEL_RE = re.compile(
-        r"(?i)\b(?:period|periode|pay\s*period|pay\s*month|salary\s*period|"
-        r"periode\s+pembayaran)\b\s*[:=]?\s*(.{0,40})"
-    )
-    _PERIOD_MONTH_RE = re.compile(
-        r"(?i)\b(" + "|".join(sorted(_PERIOD_MONTHS, key=len, reverse=True)) + r")\b[\s,/\-_]*(\d{4})"
-    )
-    _PERIOD_ISO_RE = re.compile(r"\b(\d{4})[\-_/](\d{2})\b")
-
-    def _find_period(self, lines: list[dict[str, Any]]) -> str | None:
-        """Locate the pay period as ``YYYY-MM``.
-
-        Looks for a line carrying a ``Period:`` / ``Periode:`` label followed
-        by ``<Month> <Year>`` or ``YYYY-MM``. Falls back to a free-floating
-        ``<Month> <Year>`` token anywhere in the document so slips that omit
-        the label still resolve. Returns ``None`` only when no plausible
-        month-year combination is found.
-        """
-        # Pass 1 — label-anchored search. Strongest signal.
-        for line in lines:
-            text = line["text"] or ""
-            label = self._PERIOD_LABEL_RE.search(text)
-            if not label:
-                continue
-            tail = label.group(1)
-            # Try Month-Year first inside the tail
-            m = self._PERIOD_MONTH_RE.search(tail)
-            if m:
-                mon = self._PERIOD_MONTHS[m.group(1).upper()]
-                year = int(m.group(2))
-                return f"{year:04d}-{mon:02d}"
-            # Try YYYY-MM inside the tail
-            iso = self._PERIOD_ISO_RE.search(tail)
-            if iso:
-                return f"{int(iso.group(1)):04d}-{int(iso.group(2)):02d}"
-        # Pass 2 — any unlabeled ``<Month> <Year>`` anywhere. We accept the
-        # FIRST match (slips usually print the pay period near the top).
-        for line in lines:
-            m = self._PERIOD_MONTH_RE.search(line["text"] or "")
-            if m:
-                mon = self._PERIOD_MONTHS[m.group(1).upper()]
-                year = int(m.group(2))
-                return f"{year:04d}-{mon:02d}"
-        return None
 
     def _flatten_lines(self, extracted: dict[str, Any]) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
@@ -799,6 +653,9 @@ class SalarySlipAnalyzer:
                 totals.append(item)
         return totals[-1].amount if totals else None
 
+    def _positive_money(self, value: int | float | None) -> int | float | None:
+        return abs(value) if isinstance(value, (int, float)) else value
+
     def _find_net_pay(
         self,
         lines: list[dict[str, Any]],
@@ -850,6 +707,7 @@ class SalarySlipAnalyzer:
         )
         name_patterns = (
             r"(?i)\bNama(?:\s+(?:Lengkap|Karyawan|Pegawai))?\s*:?\s*(.+)",
+            r"(?i)\bEmployee\s*:\s*(?:\d+\s*[-–—]\s*)?(.+)",
             r"(?i)\bEmployee\s+Name\s*:?\s*(.+)",
             r"(?i)\bName\s*:?\s*(.+)",
         )
@@ -911,6 +769,7 @@ class SalarySlipAnalyzer:
         for marker in (" Periode", " Karyawan", " Jabatan", " Status"):
             if marker in value:
                 value = normalize_space(value.split(marker, 1)[0])
+        value = re.sub(r"(?i)^(company\s+name|nama\s+perusahaan)\s*:\s*", "", value).strip()
         return value.strip(" :-")
 
     def _is_total(self, item: LineItem) -> bool:
@@ -970,79 +829,3 @@ def iter_pdfs(input_path: Path) -> list[Path]:
     if input_path.is_file() and input_path.suffix.lower() == ".pdf":
         return [input_path]
     return sorted(path for path in input_path.rglob("*") if path.suffix.lower() == ".pdf")
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Extract and summarize salary-slip PDFs.")
-    parser.add_argument(
-        "-i",
-        "--input",
-        default="input",
-        type=Path,
-        help="Input PDF file or folder. Default: input",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        default="output",
-        type=Path,
-        help="Output folder for JSON files. Default: output",
-    )
-    parser.add_argument(
-        "-c",
-        "--config",
-        type=Path,
-        help="Optional JSON file with ParserConfig keyword overrides.",
-    )
-    parser.add_argument(
-        "--ocr",
-        choices=("auto", "never", "always"),
-        default="auto",
-        help="OCR fallback mode. Default: auto",
-    )
-    return parser.parse_args()
-
-
-def main() -> None:
-    args = parse_args()
-    pdfs = iter_pdfs(args.input)
-    if not pdfs:
-        raise SystemExit(f"No PDF files found in {args.input}")
-
-    config = ParserConfig.from_json(args.config) if args.config else ParserConfig()
-    extractor = AutoOcrPdfTextExtractor(config=config, ocr_mode=args.ocr)
-    analyzer = SalarySlipAnalyzer(config)
-    extracted_documents = []
-    summaries = []
-
-    for pdf_path in pdfs:
-        extracted = extractor.extract(pdf_path)
-        summary = analyzer.analyze(extracted)
-        extracted_documents.append(extracted)
-        summaries.append(summary_to_jsonable(summary))
-
-        stem = pdf_path.stem
-        write_json(args.output / "extracted" / f"{stem}.json", extracted)
-        write_json(args.output / "summary" / f"{stem}.json", summary_to_jsonable(summary))
-
-    aggregate = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "document_count": len(summaries),
-        "paid_salary_grand_total": sum(
-            item["paid_salary_total"] or 0 for item in summaries
-        ),
-        "incentive_grand_total": sum(item["incentive_total"] or 0 for item in summaries),
-        "tax_cutoff_grand_total": sum(item["tax_cutoff_total"] or 0 for item in summaries),
-        "other_cutoff_grand_total": sum(item["other_cutoff_total"] or 0 for item in summaries),
-        "documents": summaries,
-    }
-    write_json(args.output / "all_extracted.json", extracted_documents)
-    write_json(args.output / "salary_summary.json", aggregate)
-
-    print(f"Parsed {len(pdfs)} PDF(s).")
-    print(f"Raw extraction JSON: {args.output / 'all_extracted.json'}")
-    print(f"Salary summary JSON: {args.output / 'salary_summary.json'}")
-
-
-if __name__ == "__main__":
-    main()

@@ -10,6 +10,11 @@ input/*.pdf
 output*/
 web_output/
 
+# Per-request runs written by app.py's /parse handler — each run carries the
+# uploaded PDFs and the rendered extracted/summary JSON. They're ephemeral
+# per-tenant artifacts; never check them in (would leak PII).
+runs/
+
 # Local environment files.
 .env
 .venv/

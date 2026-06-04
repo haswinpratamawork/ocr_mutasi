@@ -1,340 +1,215 @@
 #!/usr/bin/env python3
-"""FastAPI service for salary-slip parsing."""
+"""FastAPI wrapper for the salary slip parser.
+
+One API request represents one nasabah/customer. Upload one or more PDFs for
+that person, and the parser writes one combined extracted JSON and summary JSON.
+
+The ``/parse`` response embeds the new Indonesian-keyed ``summary`` dict as well
+as a backwards-compatible ``documents`` / ``totals`` projection so the existing
+``/upload`` browser UI and the ocr_match orchestrator both keep working without
+changes.
+"""
 
 from __future__ import annotations
 
 import shutil
-from datetime import datetime, timezone
+import sys
+import uuid
+from datetime import datetime
 from pathlib import Path
-from tempfile import TemporaryDirectory
-from typing import Annotated
+from typing import Any, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
-
-# pikepdf is used as a pre-processor for password-protected PDFs: we open
-# the encrypted PDF with the caller-supplied password and write an
-# unencrypted copy to a temp file that the existing salary_slip_parser
-# can read without further changes. Owner-only locks are stripped legitimately;
-# user passwords are never brute-forced — if the supplied password is wrong
-# we return a clear 422.
-import pikepdf
-
-from salary_slip_parser import (
-    AutoOcrPdfTextExtractor,
-    ParserConfig,
-    SalarySlipAnalyzer,
-    summary_to_jsonable,
-)
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 
-BASE_SALARY_KEYWORDS = (
-    "gaji pokok",
-    "upah pokok",
-    "basic salary",
-    "base salary",
-    "base compensation",
-    "imbalan dasar",
-    "pokok",
-)
+BASE_DIR = Path(__file__).resolve().parent
+PARSER_DIR = BASE_DIR
+RUNS_DIR = BASE_DIR / "runs"
 
+sys.path.insert(0, str(PARSER_DIR))
 
-class HealthResponse(BaseModel):
-    status: str = Field(examples=["ok"])
+from extract_salary import parse_upload  # noqa: E402
 
-
-class ApiInfoResponse(BaseModel):
-    service: str
-    docs_url: str
-    parse_endpoint: str
-    health_endpoint: str
-
-
-class ParsedDocument(BaseModel):
-    source_file: str
-    worker_name: str | None
-    institution_name: str | None
-    total_paid: int | float | None
-    pokok: int | float
-    tax: int | float
-    incentive: int | float
-    deduction: int | float
-    other_deduction: int | float
-    period: str | None = None  # YYYY-MM, extracted from the slip's "Period:" line
-    confidence_notes: list[str]
-    extraction_method: str
-
-
-class ParseError(BaseModel):
-    source_file: str
-    error: str
-
-
-class ParseTotals(BaseModel):
-    total_paid: int | float
-    pokok: int | float
-    tax: int | float
-    incentive: int | float
-    deduction: int | float
-    other_deduction: int | float
-
-
-class ParseResponse(BaseModel):
-    generated_at: str
-    document_count: int
-    totals: ParseTotals
-    documents: list[ParsedDocument]
-    errors: list[ParseError]
 
 app = FastAPI(
-    title="Salary Slip Parser API",
+    title="Salary Slip OCR Service API",
+    description="Upload one or more salary-slip PDFs for one nasabah/customer per request.",
     version="1.0.0",
-    description="Local API for extracting compact salary-slip JSON.",
-    openapi_version="3.0.3",
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 
-def _binary_file_schema(schema_part):
-    if isinstance(schema_part, dict):
-        if schema_part.get("contentMediaType") == "application/octet-stream":
-            schema_part.pop("contentMediaType", None)
-            schema_part["format"] = "binary"
-        for value in schema_part.values():
-            _binary_file_schema(value)
-    elif isinstance(schema_part, list):
-        for item in schema_part:
-            _binary_file_schema(item)
+def patch_upload_file_schema(value: object) -> None:
+    if isinstance(value, dict):
+        if value.get("contentMediaType") == "application/octet-stream":
+            value.pop("contentMediaType", None)
+            value["format"] = "binary"
+        for child in value.values():
+            patch_upload_file_schema(child)
+    elif isinstance(value, list):
+        for child in value:
+            patch_upload_file_schema(child)
 
 
-def custom_openapi():
+def custom_openapi() -> dict:
     if app.openapi_schema:
         return app.openapi_schema
-    schema = get_openapi(
+    openapi_schema = get_openapi(
         title=app.title,
         version=app.version,
         description=app.description,
         routes=app.routes,
     )
-    _binary_file_schema(schema)
-    app.openapi_schema = schema
+    patch_upload_file_schema(openapi_schema)
+    app.openapi_schema = openapi_schema
     return app.openapi_schema
 
 
 app.openapi = custom_openapi
 
 
-@app.get("/", response_model=ApiInfoResponse)
-def api_info() -> dict:
-    return {
-        "service": "Salary Slip Parser API",
-        "docs_url": "/docs",
-        "parse_endpoint": "POST /parse",
-        "health_endpoint": "GET /health",
-    }
+def new_run_id() -> str:
+    return datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
 
 
-def is_pdf(filename: str) -> bool:
-    return Path(filename).suffix.lower() == ".pdf"
+async def save_uploads(files: list[UploadFile], upload_dir: Path) -> list[str]:
+    saved_files = []
+    upload_dir.mkdir(parents=True, exist_ok=True)
 
+    for upload in files:
+        file_name = Path(upload.filename or "").name
+        if not file_name:
+            continue
+        if not file_name.casefold().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail=f"{file_name} is not a PDF file.")
 
-def base_salary_total(summary: dict) -> int | float:
-    total = 0
-    for item in summary.get("earnings", []):
-        label = item.get("label", "").casefold()
-        if any(keyword in label for keyword in BASE_SALARY_KEYWORDS):
-            total += item.get("amount") or 0
-    return total
+        target = upload_dir / file_name
+        with target.open("wb") as output:
+            shutil.copyfileobj(upload.file, output)
+        saved_files.append(file_name)
 
-
-def compact_result(summary: dict) -> dict:
-    pokok = base_salary_total(summary)
-    return {
-        "source_file": Path(summary["source_file"]).name,
-        "worker_name": summary.get("worker_name"),
-        "institution_name": summary.get("institution"),
-        "total_paid": summary.get("paid_salary_total"),
-        "pokok": pokok,
-        "tax": summary.get("tax_cutoff_total") or 0,
-        "incentive": summary.get("incentive_total") or 0,
-        "deduction": summary.get("deduction_total") or 0,
-        "other_deduction": summary.get("other_cutoff_total") or 0,
-        "period": summary.get("period"),
-        "confidence_notes": summary.get("confidence_notes", []),
-    }
-
-
-class PdfPasswordRequiredError(Exception):
-    """The PDF is encrypted and the supplied password (if any) didn't open it."""
-
-
-def _decrypt_if_needed(pdf_path: Path, password: str | None) -> Path:
-    """If ``pdf_path`` is password-protected, decrypt it using ``password`` and
-    write an unencrypted copy alongside it. Returns the path the rest of the
-    pipeline should read.
-
-    Strategy:
-      1. If pikepdf can open the file with no password, it's not encrypted —
-         return the original path.
-      2. Otherwise try the caller's password; on success, save an
-         unencrypted copy and return that path.
-      3. On password failure, raise PdfPasswordRequiredError.
-    """
-    # Cheap probe: try empty password. pikepdf opens unencrypted PDFs fine
-    # this way too.
-    try:
-        with pikepdf.open(pdf_path) as _:
-            return pdf_path
-    except pikepdf.PasswordError:
-        pass  # really is encrypted; fall through
-    except pikepdf.PdfError:
-        return pdf_path  # malformed — let the parser fail with its own error
-    # Need the caller's password.
-    try:
-        with pikepdf.open(pdf_path, password=password or "") as pdf:
-            decrypted_path = pdf_path.with_suffix(".dec.pdf")
-            pdf.save(decrypted_path)  # save() drops encryption by default
-            return decrypted_path
-    except pikepdf.PasswordError as exc:
-        raise PdfPasswordRequiredError(
-            "PDF is password-protected and the supplied password (if any) is incorrect"
-        ) from exc
-
-
-def parse_pdf(pdf_path: Path, original_name: str, ocr: str, password: str | None = None) -> dict:
-    config = ParserConfig()
-    extractor = AutoOcrPdfTextExtractor(config=config, ocr_mode=ocr)
-    analyzer = SalarySlipAnalyzer(config)
-
-    readable_path = _decrypt_if_needed(pdf_path, password)
-    extracted = extractor.extract(readable_path)
-    extracted["source_file"] = original_name
-    summary = summary_to_jsonable(analyzer.analyze(extracted))
-    summary["source_file"] = original_name
-    result = compact_result(summary)
-    result["extraction_method"] = extracted.get("extraction_method", "pdf_text")
-    return result
-
-
-@app.get("/health", response_model=HealthResponse)
-def health() -> dict:
-    return {"status": "ok"}
-
-
-@app.post("/parse", response_model=ParseResponse)
-def parse_salary_slips(
-    files: Annotated[list[UploadFile], File(description="One or more PDF salary slips.")],
-    ocr: str = "auto",
-    password: Annotated[
-        str | None,
-        Form(description="Optional PDF password applied to every file in the batch."),
-    ] = None,
-) -> dict:
-    if ocr not in {"auto", "never", "always"}:
-        raise HTTPException(status_code=400, detail="ocr must be one of: auto, never, always")
-    if not files:
+    if not saved_files:
         raise HTTPException(status_code=400, detail="Upload at least one PDF file.")
+    return saved_files
 
-    documents = []
-    errors = []
 
-    with TemporaryDirectory(prefix="salary-slip-api-") as temp_dir:
-        temp_path = Path(temp_dir)
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok", "parser_folder": str(PARSER_DIR)}
 
-        for upload in files:
-            original_name = upload.filename or "unnamed.pdf"
-            if not is_pdf(original_name):
-                errors.append({"source_file": original_name, "error": "Only PDF files are supported."})
-                continue
 
-            pdf_path = temp_path / Path(original_name).name
-            with pdf_path.open("wb") as output:
-                shutil.copyfileobj(upload.file, output)
+@app.post("/parse")
+async def parse_salary_slips(
+    files: list[UploadFile] = File(..., description="One or more salary-slip PDFs for one nasabah."),
+    password: Optional[str] = Form(None, description="Optional PDF password if the uploaded PDFs are protected."),
+) -> JSONResponse:
+    run_id = new_run_id()
+    run_dir = RUNS_DIR / run_id
+    upload_dir = run_dir / "uploads"
+    output_dir = run_dir / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-            try:
-                documents.append(parse_pdf(pdf_path, original_name, ocr, password=password))
-            except PdfPasswordRequiredError as exc:
-                errors.append({
-                    "source_file": original_name,
-                    "error": (
-                        "PDF is password-protected. Pass the password as the "
-                        "'password' form field."
-                    ),
-                })
-            except Exception as exc:
-                errors.append({"source_file": original_name, "error": str(exc)})
+    saved_files = await save_uploads(files, upload_dir)
+    summary = parse_upload(
+        upload_dir,
+        output_dir,
+        password=password,
+        allow_password_prompt=False,
+    )
+    needs_password = any(
+        "password" in (error.get("kesalahan") or "").casefold()
+        for error in summary.get("kesalahan", [])
+    )
+    # Re-emit the per-document and aggregate-totals views with English keys —
+    # the existing /upload HTML and the ocr_match orchestrator both consume
+    # this shape unchanged. The new Indonesian-keyed ``summary`` is still
+    # available alongside for clients that want richer data.
+    documents = [_document_compat(d) for d in summary.get("dokumen", [])]
+    totals = _totals_compat(summary.get("periode", {}).get("total"))
+    errors = [
+        {"source_file": e.get("sumber_file") or e.get("source_file"),
+         "error":       e.get("kesalahan")   or e.get("error")}
+        for e in summary.get("kesalahan", [])
+    ]
+    return JSONResponse(
+        {
+            "ok": True,
+            "needs_password": needs_password,
+            "run_id": run_id,
+            "uploaded_files": saved_files,
+            # Compat keys for the /upload UI and ocr_match — same shape the
+            # pre-rework API exposed.
+            "documents": documents,
+            "totals": totals,
+            "document_count": len(documents),
+            "errors": errors,
+            # New Indonesian-keyed view (rework upstream's preferred shape).
+            "summary": summary,
+            "output_files": {
+                "output_folder": str(output_dir),
+                "extracted": str(output_dir / "extracted.json"),
+                "summary": str(output_dir / "summary.json"),
+            },
+        }
+    )
 
+
+# --------------------------- compat shim ----------------------------------
+# Map the new Indonesian-keyed per-document dict back to the English-keyed
+# shape both the /upload HTML and the ocr_match service consume. Adds a
+# safety-net for ``period`` (already YYYY-MM via tanggal_periode but may be a
+# free-form Bulan Tahun string on some slips).
+
+def _document_compat(d: dict[str, Any]) -> dict[str, Any]:
+    """Project one ``summary.dokumen[*]`` entry to the legacy English keys."""
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "document_count": len(documents),
-        "totals": {
-            "total_paid": sum(item["total_paid"] or 0 for item in documents),
-            "pokok": sum(item["pokok"] or 0 for item in documents),
-            "tax": sum(item["tax"] or 0 for item in documents),
-            "incentive": sum(item["incentive"] or 0 for item in documents),
-            "deduction": sum(item["deduction"] or 0 for item in documents),
-            "other_deduction": sum(item["other_deduction"] or 0 for item in documents),
-        },
-        "documents": documents,
-        "errors": errors,
+        "source_file":        d.get("sumber_file"),
+        "worker_name":        d.get("nama_pekerja"),
+        "institution_name":   d.get("nama_institusi"),
+        "total_paid":         _num(d.get("total_dibayar")),
+        "pokok":              _num(d.get("gaji_pokok")) or 0,
+        "tax":                _num(d.get("pajak")) or 0,
+        "incentive":          _num(d.get("tunjangan")) or 0,
+        "deduction":          _num(d.get("potongan")) or 0,
+        "other_deduction":    _num(d.get("potongan_lain")) or 0,
+        "period":             d.get("tanggal_periode"),
+        "extraction_method":  d.get("metode_ekstraksi") or "",
+        "confidence_notes":   list(d.get("catatan") or []),
     }
 
 
-@app.post("/parse-one", response_model=ParsedDocument)
-def parse_one_salary_slip(
-    file: Annotated[UploadFile, File(description="One PDF salary slip.")],
-    ocr: str = "auto",
-    password: Annotated[
-        str | None,
-        Form(description="Optional PDF password if the file is encrypted."),
-    ] = None,
-) -> dict:
-    if ocr not in {"auto", "never", "always"}:
-        raise HTTPException(status_code=400, detail="ocr must be one of: auto, never, always")
-
-    original_name = file.filename or "unnamed.pdf"
-    if not is_pdf(original_name):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
-
-    with TemporaryDirectory(prefix="salary-slip-api-") as temp_dir:
-        pdf_path = Path(temp_dir) / Path(original_name).name
-        with pdf_path.open("wb") as output:
-            shutil.copyfileobj(file.file, output)
-        try:
-            return parse_pdf(pdf_path, original_name, ocr, password=password)
-        except PdfPasswordRequiredError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "PDF is password-protected. Pass the password as the 'password' "
-                    "form field."
-                ),
-            ) from exc
+def _totals_compat(totals_id: dict[str, Any] | None) -> dict[str, Any]:
+    """Project ``summary.periode.total`` back to the legacy English keys."""
+    t = totals_id or {}
+    return {
+        "total_paid":      _num(t.get("total_dibayar")) or 0,
+        "pokok":           _num(t.get("gaji_pokok")) or 0,
+        "tax":             _num(t.get("pajak")) or 0,
+        "incentive":       _num(t.get("tunjangan")) or 0,
+        "deduction":       _num(t.get("potongan")) or 0,
+        "other_deduction": _num(t.get("potongan_lain")) or 0,
+    }
 
 
-# ---------------------------------------------------------------------------
-# /upload — self-contained HTML drag-and-drop page
-#
-# This route exists for the same reason as the matching one on the
-# ocr_mutasi service: Swagger UI insists on rendering an "Add string item"
-# button per file slot, which is awkward for multi-file PDF uploads. The
-# native <input type="file" multiple> below lets the OS file picker handle
-# multi-selection (Cmd-click on macOS, Ctrl-click on Windows/Linux) in a
-# single click. After upload, the page renders per-document salary cards
-# (worker / institution / take-home pay / pokok-tax-incentive-deduction
-# breakdown), an aggregate totals card across all files, and a collapsible
-# raw-JSON panel.
-# ---------------------------------------------------------------------------
+def _num(value: Any) -> int | float | None:
+    """Pass through numeric values, coerce nulls / empty strings to ``None``."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+# --------------------------- /upload browser page -------------------------
+# Self-contained HTML drag-and-drop page reused verbatim from the pre-rework
+# api_app.py — same UX (native multi-select via <input type="file" multiple>,
+# per-document salary cards, aggregate totals card, raw-JSON panel). The
+# response shape it depends on (``documents`` + ``totals``) is provided by
+# the compat shim above.
 
 _UPLOAD_PAGE = """<!doctype html>
 <html lang="en">
@@ -544,7 +419,7 @@ form.addEventListener('submit', async (e) => {
   goBtn.disabled = true;
   const t0 = performance.now();
   try {
-    const r = await fetch(`/parse?ocr=${encodeURIComponent(ocr)}`,
+    const r = await fetch(`/parse`,
                          { method: 'POST', body: fd });
     const data = await r.json();
     const dt = ((performance.now() - t0) / 1000).toFixed(2);
@@ -648,19 +523,11 @@ function renderErrors(data) {
 </html>"""
 
 
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    return RedirectResponse(url="/upload", status_code=307)
+
+
 @app.get("/upload", response_class=HTMLResponse, include_in_schema=False)
 def upload_page() -> HTMLResponse:
-    """Self-contained HTML drag-and-drop UI for the /parse endpoint.
-
-    Mirrors the design of the matching page on the ocr_mutasi service so
-    both APIs feel like part of the same toolkit. Uses a native
-    `<input type="file" multiple>` so the OS file picker handles
-    multi-selection — Swagger UI can't render that.
-    """
     return HTMLResponse(_UPLOAD_PAGE)
-
-
-@app.get("/favicon.ico", include_in_schema=False)
-def favicon() -> Response:
-    """Quiet the browser's auto-request so the access log stays clean."""
-    return Response(status_code=204)
