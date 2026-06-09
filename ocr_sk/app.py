@@ -85,11 +85,14 @@ def health() -> dict:
 
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
-    return RedirectResponse(url="/web")
+    return RedirectResponse(url="/upload")
 
 
+@app.get("/upload", include_in_schema=False)
 @app.get("/web", include_in_schema=False)
-def web_ui() -> FileResponse:
+def upload_page() -> FileResponse:
+    """The drag-and-drop upload UI. Served at /upload (consistent with the
+    other services) and /web (kept as a backward-compatible alias)."""
     if not WEB_UI_INDEX.exists():
         raise HTTPException(status_code=404, detail="Web UI is not installed.")
     return FileResponse(WEB_UI_INDEX)

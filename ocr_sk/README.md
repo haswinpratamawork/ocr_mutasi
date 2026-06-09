@@ -33,7 +33,7 @@ from the root):
 .venv/bin/uvicorn ocr_sk.app:app --host 0.0.0.0 --port 8100 --reload
 ```
 
-- Browser upload page: <http://localhost:8100/web> (the bare URL redirects here)
+- Browser upload page: <http://localhost:8100/upload> (the bare URL redirects here; `/web` is a legacy alias)
 - Swagger UI: <http://localhost:8100/docs>
 
 ## Endpoints
@@ -42,8 +42,8 @@ from the root):
 |---|---|---|---|
 | POST | `/parse` | multipart `files` (one or more PDFs) + optional `password` | `{ ok, needs_password, uploaded_files, summary, extracted, output_files }` |
 | GET | `/health` | — | `{ status, parser_folder }` |
-| GET | `/web` | — | the drag-and-drop upload UI (`web-ui/index.html`) |
-| GET | `/` | — | redirect to `/web` |
+| GET | `/upload` | — | the drag-and-drop upload UI (`web-ui/index.html`); `/web` is a legacy alias |
+| GET | `/` | — | redirect to `/upload` |
 
 ```bash
 curl -s -F "files=@/path/to/surat-keterangan-kerja.pdf" \

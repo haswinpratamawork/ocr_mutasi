@@ -139,7 +139,7 @@ _UPLOAD_PAGE = """<!doctype html>
     <p class="tagline">Select one or more documents. Each is sent to PaddleOCR and classified as
       <code>ktp</code> / <code>kk</code> / <code>sk</code> / <code>slip</code> / <code>mutasi</code> /
       <code>unknown</code>. Hold <kbd>Cmd</kbd>/<kbd>Ctrl</kbd> to multi-select. &nbsp;·&nbsp;
-      <a href="/docs">Swagger UI</a></p>
+      <a href="/docs">Swagger UI</a> &nbsp;·&nbsp; <a href="/redoc">ReDoc</a></p>
 
     <form id="form" class="card">
       <label for="files" class="file-drop" id="drop">

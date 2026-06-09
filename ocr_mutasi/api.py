@@ -177,7 +177,7 @@ _UPLOAD_PAGE = """<!doctype html>
 <body>
   <div class="container">
     <h1>OCR Mutasi — Batch upload</h1>
-    <p class="tagline">Select one or more BCA / BRI mutation PDFs. Hold <kbd>Cmd</kbd> (macOS) or <kbd>Ctrl</kbd> (Windows / Linux) in the file picker to multi-select. All credits across all files are classified together in one LLM call. &nbsp;·&nbsp; <a href="/docs">Swagger UI</a> &nbsp;·&nbsp; <a href="/redoc">ReDoc</a></p>
+    <p class="tagline">Select one or more bank-statement (mutasi) PDFs — BCA, BRI, Mandiri, Permata, or Sinarmas. Hold <kbd>Cmd</kbd> (macOS) or <kbd>Ctrl</kbd> (Windows / Linux) in the file picker to multi-select. All credits across all files are classified together in one LLM call. &nbsp;·&nbsp; <a href="/docs">Swagger UI</a> &nbsp;·&nbsp; <a href="/redoc">ReDoc</a></p>
 
     <form id="form" class="card">
       <label for="files" class="file-drop" id="drop">
@@ -453,12 +453,12 @@ async def extract_mutations(
         "  -F files=@Mutasi_Januari_2026.pdf \\\n"
         "  -F files=@Mutasi_Februari_2026.pdf \\\n"
         "  -F files=@Mutasi_Maret_2026.pdf \\\n"
-        "  http://localhost:8000/api/v1/mutations/extract-batch\n"
+        "  http://localhost:8300/api/v1/mutations/extract-batch\n"
         "```\n\n"
         "Or expand a folder in one go:\n"
         "```bash\n"
         "curl -X POST $(for f in mutasi_haswin/*.pdf; do echo -n \"-F files=@$f \"; done) \\\n"
-        "  http://localhost:8000/api/v1/mutations/extract-batch\n"
+        "  http://localhost:8300/api/v1/mutations/extract-batch\n"
         "```\n\n"
         "**With Python (`httpx`):**\n"
         "```python\n"
@@ -466,7 +466,7 @@ async def extract_mutations(
         "paths = sorted(glob.glob('mutasi_haswin/*.pdf'))\n"
         "files = [('files', (p.split('/')[-1], open(p,'rb'), 'application/pdf'))\n"
         "         for p in paths]\n"
-        "r = httpx.post('http://localhost:8000/api/v1/mutations/extract-batch',\n"
+        "r = httpx.post('http://localhost:8300/api/v1/mutations/extract-batch',\n"
         "               files=files, timeout=120)\n"
         "print(r.json()['audit']['category_totals'])\n"
         "```"
