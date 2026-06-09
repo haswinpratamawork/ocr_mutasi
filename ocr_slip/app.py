@@ -98,6 +98,7 @@ def health() -> dict:
 async def parse_salary_slips(
     files: list[UploadFile] = File(..., description="One or more salary-slip PDFs for one nasabah."),
     password: Optional[str] = Form(None, description="Optional PDF password if the uploaded PDFs are protected."),
+    ocr: str = Form("auto", description="OCR fallback mode: 'auto' (PaddleOCR only if the text layer is weak), 'never' (text layer only), or 'always' (force PaddleOCR)."),
 ) -> JSONResponse:
     run_id = new_run_id()
     run_dir = RUNS_DIR / run_id
@@ -105,12 +106,14 @@ async def parse_salary_slips(
     output_dir = run_dir / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    ocr_mode = ocr if ocr in {"auto", "never", "always"} else "auto"
     saved_files = await save_uploads(files, upload_dir)
     summary = parse_upload(
         upload_dir,
         output_dir,
         password=password,
         allow_password_prompt=False,
+        ocr_mode=ocr_mode,
     )
     needs_password = any(
         "password" in (error.get("kesalahan") or "").casefold()
@@ -334,9 +337,9 @@ _UPLOAD_PAGE = """<!doctype html>
       <div class="controls">
         <label class="opt">OCR fallback:
           <select id="ocr">
-            <option value="auto" selected>auto (use OCR only if no text layer)</option>
-            <option value="never">never (PDF text only)</option>
-            <option value="always">always (force Apple Vision OCR)</option>
+            <option value="auto" selected>auto (PaddleOCR only if the text layer is weak)</option>
+            <option value="never">never (PDF text layer only)</option>
+            <option value="always">always (force PaddleOCR)</option>
           </select>
         </label>
         <button type="submit" id="go">Parse</button>
@@ -412,6 +415,7 @@ form.addEventListener('submit', async (e) => {
   const pw = document.getElementById('password').value;
   if (pw) fd.append('password', pw);
   const ocr = ocrSel.value;
+  fd.append('ocr', ocr);
   status.className = '';
   status.textContent = `Parsing ${filesIn.files.length} file(s) (ocr=${ocr})…`;
   totals.innerHTML = '';

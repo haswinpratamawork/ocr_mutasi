@@ -203,9 +203,11 @@ class PdfPasswordProvider:
         initial_password: str | None = None,
         max_attempts: int = 3,
         allow_prompt: bool = True,
+        ocr_mode: str = "auto",
     ) -> None:
         self.max_attempts = max_attempts
         self.allow_prompt = allow_prompt
+        self.ocr_mode = ocr_mode
         self._known_passwords: list[str | None] = [None]
         if initial_password:
             self._known_passwords.append(initial_password)
@@ -213,7 +215,7 @@ class PdfPasswordProvider:
     def parse_with_prompt(self, pdf_path: Path) -> dict[str, Any]:
         for password in self._known_passwords:
             try:
-                return parse_pdf(pdf_path, password=password)
+                return parse_pdf(pdf_path, password=password, ocr_mode=self.ocr_mode)
             except PdfPasswordError:
                 continue
 
@@ -239,7 +241,7 @@ class PdfPasswordProvider:
             if not password:
                 continue
             try:
-                result = parse_pdf(pdf_path, password=password)
+                result = parse_pdf(pdf_path, password=password, ocr_mode=self.ocr_mode)
             except PdfPasswordError:
                 print(f"Incorrect password for {pdf_path.name}.")
                 continue
@@ -820,14 +822,21 @@ def parse_with_llm_text(
     }
 
 
-def parse_pdf(pdf_path: Path, password: str | None = None) -> dict[str, Any]:
+def parse_pdf(pdf_path: Path, password: str | None = None, ocr_mode: str = "auto") -> dict[str, Any]:
     config = ParserConfig()
     original_name = pdf_path.name
     rule_result = parse_with_rules(pdf_path, original_name, config, password=password)
     rule_document = rule_result["documents"][0]
     rule_classification = classify_salary_slip(rule_result["extracted"])
     text_weak = text_quality_needs_ocr(rule_result["extracted"], config)
-    needs_ocr = should_use_ocr(rule_result["extracted"], rule_document, config)
+    # OCR fallback mode: "never" = text layer only, "always" = force the
+    # PaddleOCR fallback, "auto" = let the text-quality heuristic decide.
+    if ocr_mode == "never":
+        needs_ocr = False
+    elif ocr_mode == "always":
+        needs_ocr = True
+    else:
+        needs_ocr = should_use_ocr(rule_result["extracted"], rule_document, config)
 
     if rule_classification["status"] == "rejected" and not text_weak:
         raise NonSalarySlipError(original_name, rule_classification)
@@ -868,6 +877,7 @@ def parse_upload(
     output_path: Path,
     password: str | None = None,
     allow_password_prompt: bool = True,
+    ocr_mode: str = "auto",
 ) -> dict[str, Any]:
     if not input_path.is_absolute():
         cwd_input_path = input_path
@@ -887,6 +897,7 @@ def parse_upload(
     password_provider = PdfPasswordProvider(
         initial_password=password,
         allow_prompt=allow_password_prompt,
+        ocr_mode=ocr_mode,
     )
 
     for pdf_path in pdfs:
