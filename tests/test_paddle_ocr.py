@@ -67,6 +67,12 @@ class ExtractPagesPerPageTests(unittest.TestCase):
              mock.patch.object(paddle_ocr, "fetch_payload", side_effect=payloads) as fp:
             out = paddle_ocr.extract_pages_from_bytes(b"%PDF-1.4 three pages", filename="slip.pdf")
         self.assertEqual(fp.call_count, 3)  # one OCR request per page
+        # Per-page uploads must keep a real .pdf extension — the OCR service
+        # rejects anything else (e.g. a 'slip.pdf#page-1' name → HTTP 400).
+        for call in fp.call_args_list:
+            name = call.kwargs["filename"]
+            self.assertTrue(name.endswith(".pdf"), name)
+            self.assertNotIn("#", name)
         self.assertEqual(out["page_count"], 3)
         self.assertIn("MONTH ONE", out["pages"][0]["text"])
         self.assertIn("MONTH TWO", out["pages"][1]["text"])

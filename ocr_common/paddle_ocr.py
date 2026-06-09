@@ -256,9 +256,12 @@ def extract_pages_from_bytes(pdf_bytes: bytes, filename: str = "document.pdf", p
 
     request_ids: list[str] = []
     if page_blobs:
+        # Each split page is a single-page PDF — name it with a real .pdf
+        # extension (the OCR service validates the format from the filename).
+        stem = Path(filename).stem or "document"
         page_texts: list[str] = []
         for index, blob in enumerate(page_blobs):
-            payload = fetch_payload(blob, filename=f"{filename}#page-{index + 1}")
+            payload = fetch_payload(blob, filename=f"{stem}-page-{index + 1}.pdf")
             if payload.get("request_id"):
                 request_ids.append(str(payload["request_id"]))
             page_texts.append(_page_text_from_payload(payload))
