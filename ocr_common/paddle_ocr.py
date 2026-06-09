@@ -154,6 +154,52 @@ def _strip_html(markdown: str) -> str:
     return re.sub(r"[ \t]+", " ", _HTML_TAG_RE.sub(" ", markdown)).strip()
 
 
+def _page_text_from_payload(payload: dict) -> str:
+    """All recognised text from one OCR response (joins blocks across whatever
+    pages it returned; falls back to the HTML-stripped markdown rendering)."""
+    data = payload.get("data") or {}
+    parts = [_page_text(p) for p in _normalize_pages(data.get("json_result"))]
+    text = "\n".join(t for t in parts if t).strip()
+    if not text:
+        text = _strip_html(data.get("markdown") or "")
+    return text
+
+
+def _split_pdf_pages(pdf_bytes: bytes) -> list[bytes]:
+    """Split a PDF into one single-page PDF (bytes) per page.
+
+    The OCR service processes a single page per request, so we OCR each page
+    separately — otherwise a multi-page document (e.g. a 3-month salary slip
+    with one month per page) only yields page 1. Returns ``[]`` when the input
+    can't be split (e.g. it's an image, or pypdfium2 is unavailable), so the
+    caller can fall back to sending the whole file.
+    """
+    try:
+        import pypdfium2 as pdfium
+    except Exception:
+        return []
+    src = None
+    try:
+        src = pdfium.PdfDocument(pdf_bytes)
+        blobs: list[bytes] = []
+        for index in range(len(src)):
+            dst = pdfium.PdfDocument.new()
+            dst.import_pages(src, [index])
+            buf = io.BytesIO()
+            dst.save(buf)
+            dst.close()
+            blobs.append(buf.getvalue())
+        return blobs
+    except Exception:
+        return []
+    finally:
+        if src is not None:
+            try:
+                src.close()
+            except Exception:
+                pass
+
+
 def pages_from_payload(payload: dict, filename: str = "document.pdf") -> dict:
     """Map an OCR response into the same `pages[]` structure the salary-slip /
     employment-letter parsers expect from their (old) Tesseract extractor."""
@@ -198,9 +244,48 @@ def pages_from_payload(payload: dict, filename: str = "document.pdf") -> dict:
 # ----------------------------- public API -----------------------------------
 
 def extract_pages_from_bytes(pdf_bytes: bytes, filename: str = "document.pdf", password: str | None = None) -> dict:
-    """OCR a PDF (bytes) and return the `pages[]` extraction dict."""
-    payload = fetch_payload(pdf_bytes, filename=filename, password=password)
-    return pages_from_payload(payload, filename=filename)
+    """OCR a PDF (bytes) and return one ``pages[]`` entry PER SOURCE PAGE.
+
+    Because the OCR service handles a single page per request, we split the PDF
+    and OCR each page separately, then assemble the per-page results. This is
+    what makes a multi-page document (e.g. a 3-month salary slip, one month per
+    page) extract every page instead of only the first.
+    """
+    decrypted = _maybe_decrypt(pdf_bytes, password)
+    page_blobs = _split_pdf_pages(decrypted)
+
+    request_ids: list[str] = []
+    if page_blobs:
+        page_texts: list[str] = []
+        for index, blob in enumerate(page_blobs):
+            payload = fetch_payload(blob, filename=f"{filename}#page-{index + 1}")
+            if payload.get("request_id"):
+                request_ids.append(str(payload["request_id"]))
+            page_texts.append(_page_text_from_payload(payload))
+    else:
+        # Couldn't split (an image, or not a PDF) — OCR the whole file once.
+        payload = fetch_payload(decrypted, filename=filename)
+        if payload.get("request_id"):
+            request_ids.append(str(payload["request_id"]))
+        page_texts = [_page_text_from_payload(payload)]
+
+    pages = [
+        {
+            "page_number": i + 1,
+            "char_count": len(text),
+            "text": text,
+            "lines": [ln.strip() for ln in text.splitlines() if ln.strip()],
+        }
+        for i, text in enumerate(page_texts)
+    ]
+    return {
+        "source_file": filename,
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "extraction_method": "ocr_paddle",
+        "page_count": len(pages),
+        "pages": pages,
+        "warnings": [f"OCR via PaddleOCR service ({len(pages)} page(s); request_ids={request_ids})."],
+    }
 
 
 def extract_pages(pdf_path: Path | str, password: str | None = None) -> dict:
@@ -213,9 +298,8 @@ def extract_pages(pdf_path: Path | str, password: str | None = None) -> dict:
 
 
 def extract_text_from_bytes(pdf_bytes: bytes, password: str | None = None) -> str:
-    """OCR a PDF (bytes) and return all recognised text as one string
-    (pages joined by blank lines). Used by ocr_mutasi's scanned-statement path.
+    """OCR a PDF (bytes) and return all recognised text as one string (every
+    page, joined by blank lines). Used by ocr_mutasi's scanned-statement path.
     """
-    payload = fetch_payload(pdf_bytes, password=password)
-    pages = pages_from_payload(payload)["pages"]
+    pages = extract_pages_from_bytes(pdf_bytes, password=password)["pages"]
     return "\n\n".join(p["text"] for p in pages if p["text"]).strip()
