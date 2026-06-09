@@ -94,6 +94,22 @@ class LlmPostprocessIncentiveTests(unittest.TestCase):
         postprocess_from_text(doc, page)
         self.assertEqual(doc["incentive"], 500000)
 
+    def test_overrides_llm_hallucinated_incentive_from_ocr_garbage(self):
+        # LLM mis-read OCR garbage ('crrreee 1000050') as an incentive; there is
+        # no allowance keyword line, and the Gaji rows already equal the gross.
+        page = (
+            "Gaji Penjualan Mumi EsKristal 27.973.000\n"
+            "Gaji Penjualan Dingin Es Bersama 21.324.625\n"
+            "Gaji Penjualan Muml Es Krisral 5.141.000\n"
+            "crrreee 1000050\n"
+            "Total Penghasilan Bruto 54.438.625\n"
+        )
+        doc = {"pokok": 53388625, "incentive": 1050000, "deduction": 0,
+               "total_paid": 54438625, "institution_name": "", "confidence_notes": []}
+        postprocess_from_text(doc, page)
+        self.assertEqual(doc["incentive"], 0)
+        self.assertEqual(doc["pokok"], 54438625)
+
 
 if __name__ == "__main__":
     unittest.main()
