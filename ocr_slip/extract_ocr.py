@@ -14,7 +14,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from extract_parser import normalize_space, open_pdf_document
+from .extract_parser import normalize_space, open_pdf_document
 
 
 class TesseractOcrExtractor:

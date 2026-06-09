@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from extract_parser import (
+from .extract_parser import (
     PdfPasswordError,
     PdfTextExtractor,
     ParserConfig,
@@ -771,7 +771,7 @@ def parse_with_local_ocr(
     config: ParserConfig,
     password: str | None = None,
 ) -> dict[str, Any]:
-    from extract_ocr import TesseractOcrExtractor
+    from .extract_ocr import TesseractOcrExtractor
 
     extracted = TesseractOcrExtractor().extract(pdf_path, password=password)
     return parse_extracted_with_rules(extracted, original_name, config)
@@ -782,7 +782,7 @@ def parse_with_llm_text(
     original_name: str,
     existing_documents: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    from extract_llm import LLMTextMatcher
+    from .extract_llm import LLMTextMatcher
 
     matcher = LLMTextMatcher()
     documents = []

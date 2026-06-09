@@ -17,6 +17,11 @@ openai>=1.55,<2
 # HTTP client for the PaddleOCR upstream call (ocr_classifier)
 httpx>=0.27,<1
 
+# ocr_slip salary-slip parser: image rendering + its requests-based Azure call
+Pillow>=10.0,<12
+requests>=2.32,<3
+urllib3<2
+
 # Settings / models
 pydantic>=2.9,<3
 pydantic-settings>=2.6,<3

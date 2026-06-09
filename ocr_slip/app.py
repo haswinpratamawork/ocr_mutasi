@@ -13,7 +13,6 @@ changes.
 from __future__ import annotations
 
 import shutil
-import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -23,14 +22,10 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from .extract_salary import parse_upload
 
 BASE_DIR = Path(__file__).resolve().parent
-PARSER_DIR = BASE_DIR
 RUNS_DIR = BASE_DIR / "runs"
-
-sys.path.insert(0, str(PARSER_DIR))
-
-from extract_salary import parse_upload  # noqa: E402
 
 
 app = FastAPI(

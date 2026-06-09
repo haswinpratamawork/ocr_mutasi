@@ -27,12 +27,15 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls, env_path: Path | None = None) -> "LLMConfig":
-        load_env_file(env_path or BASE_DIR / ".env")
+        # Centralized config: read the shared Azure OpenAI credentials from the
+        # repo-root .env (the same keys ocr_mutasi / ocr_match / ocr_classifier
+        # use), so there is a single source of truth for the LLM endpoint.
+        load_env_file(env_path or BASE_DIR.parent / ".env")
         required = {
-            "endpoint": "LLM_ENDPOINT",
-            "api_key": "LLM_API_KEY",
-            "api_version": "LLM_API_VERSION",
-            "deployment": "LLM_DEPLOYMENT",
+            "endpoint": "AZURE_OPENAI_ENDPOINT",
+            "api_key": "AZURE_OPENAI_API_KEY",
+            "api_version": "AZURE_OPENAI_API_VERSION",
+            "deployment": "AZURE_OPENAI_DEPLOYMENT",
         }
         values = {field: os.environ.get(name, "").strip() for field, name in required.items()}
         missing = [required[field] for field, value in values.items() if not value]
@@ -40,7 +43,7 @@ class LLMConfig:
             raise RuntimeError(
                 "LLM text fallback is not configured. Missing: "
                 + ", ".join(missing)
-                + ". Create a local .env file from .env.example."
+                + ". Set them in the repo-root .env (see .env.example)."
             )
         return cls(**values)
 

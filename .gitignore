@@ -38,6 +38,12 @@ tmp/
 *.log
 *.json.bak
 
+# ocr_slip per-request run artifacts + generated parser/UI output. These carry
+# uploaded PDFs and extracted JSON with PII (names, salaries) — never commit.
+runs/
+output*/
+web_output/
+
 # =============================================================================
 #  Python
 # =============================================================================

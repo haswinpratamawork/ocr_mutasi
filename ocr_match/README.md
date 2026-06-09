@@ -14,11 +14,14 @@ The design spec is in [`docs/superpowers/specs/2026-06-02-ocr-match-design.md`](
 
 ## Quick start
 
-```bash
-# from ocr_mutasi project root
-cd ocr_match
+All four services live in one monorepo and share the **repo-root** `.venv`,
+`requirements.txt`, and `.env`. Run everything **from the repo root** (not from
+inside `ocr_match/`).
 
-# 1. venv + deps
+```bash
+# from the ocr_mutasi repo root
+
+# 1. venv + deps (once, shared by all services)
 /opt/homebrew/bin/python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
@@ -26,10 +29,11 @@ cd ocr_match
 cp .env.example .env
 $EDITOR .env       # fill in AZURE_OPENAI_*; defaults for OCR_SLIP_URL / OCR_MUTASI_URL are fine
 
-# 3. start the two upstream services in separate shells:
-#    Shell A:  .venv/bin/uvicorn ocr_mutasi.api:app --port 8000 --reload     (from ocr_mutasi project root)
-#    Shell B:  cd ocr_slip && PORT=8100 ./run_api.sh
-#    Shell C:  .venv/bin/uvicorn ocr_match.api:app --port 8200 --reload
+# 3. start the two upstream services + the matcher in separate shells
+#    (all from the repo root):
+#    Shell A:  .venv/bin/uvicorn ocr_mutasi.api:app --port 8000 --reload
+#    Shell B:  .venv/bin/uvicorn ocr_slip.app:app   --port 8100 --reload
+#    Shell C:  .venv/bin/uvicorn ocr_match.api:app  --port 8200 --reload
 
 # 4. open the upload page
 open http://127.0.0.1:8200/upload
@@ -171,20 +175,21 @@ Loaded once at startup via `pydantic-settings`. Defaults in `config.py`; overrid
 
 ## Project layout
 
+A flat package at the repo root (same layout as `ocr_mutasi` / `ocr_classifier`).
+Config files are centralized at the repo root — there is no per-service
+`.env` / `requirements.txt` / `.venv`.
+
 ```
-ocr_match/
-├── ocr_match/
-│   ├── __init__.py
-│   ├── config.py            ← .env loader (pydantic-settings)
-│   ├── models.py            ← Pydantic response types
-│   ├── upstream.py          ← async HTTP clients for ocr_slip + ocr_mutasi
-│   ├── matcher.py           ← per-month Azure OpenAI call + rule enforcement
-│   ├── pipeline.py          ← orchestrator (single run() entry point)
-│   └── api.py               ← FastAPI app + /upload HTML page
-├── .env.example
-├── .gitignore               ← excludes .env, .venv, *.pdf (PII)
-├── requirements.txt
-└── README.md                ← this file
+ocr_mutasi/                      ← repo root (shared .env, requirements.txt, .venv, .gitignore)
+└── ocr_match/
+    ├── __init__.py
+    ├── config.py            ← reads the repo-root .env (pydantic-settings)
+    ├── models.py            ← Pydantic response types
+    ├── upstream.py          ← async HTTP clients for ocr_slip + ocr_mutasi
+    ├── matcher.py           ← per-month Azure OpenAI call + rule enforcement
+    ├── pipeline.py          ← orchestrator (single run() entry point)
+    ├── api.py               ← FastAPI app + /upload HTML page
+    └── README.md            ← this file
 ```
 
 ---

@@ -10,8 +10,12 @@ parser from their own machine.
 
 ## Install
 
+This service is part of the `ocr_mutasi` monorepo and shares the **repo-root**
+`.venv`, `requirements.txt`, and `.env` (its Azure credentials come from the
+shared `AZURE_OPENAI_*` keys). From the repo root:
+
 ```bash
-python3 -m pip install -r requirements.txt
+.venv/bin/pip install -r requirements.txt
 ```
 
 Put local PDFs in `input/`. Real salary slips can contain private salary data,
@@ -90,22 +94,23 @@ PORT=5051 python3 web_app.py
 
 ## Local FastAPI Service
 
-Start the API:
+`ocr_slip` is a package — run it from the **repo root** (where the shared
+`.venv` and `.env` live), on port 8100:
 
 ```bash
-./run_api.sh
+.venv/bin/uvicorn ocr_slip.app:app --host 0.0.0.0 --port 8100 --reload
 ```
 
 Open the interactive API docs:
 
 ```text
-http://127.0.0.1:8000/docs
+http://127.0.0.1:8100/docs
 ```
 
 Parse one or more PDFs:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/parse?ocr=auto" \
+curl -X POST "http://127.0.0.1:8100/parse?ocr=auto" \
   -F "files=@/path/to/salary-slip.pdf"
 ```
 
