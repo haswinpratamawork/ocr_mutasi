@@ -255,16 +255,29 @@ def extract_pages_from_bytes(pdf_bytes: bytes, filename: str = "document.pdf", p
     page_blobs = _split_pdf_pages(decrypted)
 
     request_ids: list[str] = []
+    page_warnings: list[str] = []
     if page_blobs:
         # Each split page is a single-page PDF — name it with a real .pdf
         # extension (the OCR service validates the format from the filename).
         stem = Path(filename).stem or "document"
         page_texts: list[str] = []
+        failures = 0
         for index, blob in enumerate(page_blobs):
-            payload = fetch_payload(blob, filename=f"{stem}-page-{index + 1}.pdf")
+            try:
+                payload = fetch_payload(blob, filename=f"{stem}-page-{index + 1}.pdf")
+            except PaddleOcrError as exc:
+                # One page failing (timeout, transient 5xx, a bad page) must not
+                # sink the whole document — keep the slot empty and carry on.
+                failures += 1
+                page_warnings.append(f"page {index + 1} OCR failed: {exc}")
+                page_texts.append("")
+                continue
             if payload.get("request_id"):
                 request_ids.append(str(payload["request_id"]))
             page_texts.append(_page_text_from_payload(payload))
+        if failures and failures == len(page_blobs):
+            # Every page failed — that's a real OCR outage, surface it.
+            raise PaddleOcrError("; ".join(page_warnings) or "OCR failed for every page")
     else:
         # Couldn't split (an image, or not a PDF) — OCR the whole file once.
         payload = fetch_payload(decrypted, filename=filename)
@@ -287,7 +300,8 @@ def extract_pages_from_bytes(pdf_bytes: bytes, filename: str = "document.pdf", p
         "extraction_method": "ocr_paddle",
         "page_count": len(pages),
         "pages": pages,
-        "warnings": [f"OCR via PaddleOCR service ({len(pages)} page(s); request_ids={request_ids})."],
+        "warnings": [f"OCR via PaddleOCR service ({len(pages)} page(s); request_ids={request_ids})."]
+        + page_warnings,
     }
 
 

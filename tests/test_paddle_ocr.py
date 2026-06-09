@@ -78,6 +78,27 @@ class ExtractPagesPerPageTests(unittest.TestCase):
         self.assertIn("MONTH TWO", out["pages"][1]["text"])
         self.assertIn("MONTH THREE", out["pages"][2]["text"])
 
+    def test_one_failing_page_does_not_abort(self):
+        payloads = [
+            {"request_id": "r1", "data": {"json_result": _page("MONTH ONE")}},
+            paddle_ocr.PaddleOcrError("page 2 boom"),
+            {"request_id": "r3", "data": {"json_result": _page("MONTH THREE")}},
+        ]
+        with mock.patch.object(paddle_ocr, "_split_pdf_pages", return_value=[b"p1", b"p2", b"p3"]), \
+             mock.patch.object(paddle_ocr, "fetch_payload", side_effect=payloads):
+            out = paddle_ocr.extract_pages_from_bytes(b"%PDF", filename="slip.pdf")
+        self.assertEqual(out["page_count"], 3)
+        self.assertIn("MONTH ONE", out["pages"][0]["text"])
+        self.assertEqual(out["pages"][1]["text"], "")          # the failed page is empty, not fatal
+        self.assertIn("MONTH THREE", out["pages"][2]["text"])
+        self.assertTrue(any("page 2 OCR failed" in w for w in out["warnings"]))
+
+    def test_all_pages_failing_raises(self):
+        with mock.patch.object(paddle_ocr, "_split_pdf_pages", return_value=[b"p1", b"p2"]), \
+             mock.patch.object(paddle_ocr, "fetch_payload", side_effect=paddle_ocr.PaddleOcrError("service down")):
+            with self.assertRaises(paddle_ocr.PaddleOcrError):
+                paddle_ocr.extract_pages_from_bytes(b"%PDF", filename="slip.pdf")
+
     def test_fallback_when_unsplittable(self):
         payload = {"data": {"json_result": _page("SINGLE IMAGE DOC")}}
         with mock.patch.object(paddle_ocr, "_split_pdf_pages", return_value=[]), \

@@ -195,6 +195,25 @@ class NonSalarySlipError(RuntimeError):
         self.classification = classification
 
 
+class OcrUnavailableError(RuntimeError):
+    """Raised when a scanned slip needs OCR but the OCR service failed or
+    returned no text. Distinct from NonSalarySlipError so the user isn't told a
+    real slip 'is not a salary slip' when the actual problem is OCR."""
+
+    def __init__(self, source_file: str, detail: str) -> None:
+        super().__init__(
+            f"Could not read '{source_file}': it has no usable text layer and "
+            f"OCR did not return text ({detail}). Check the OCR service and retry."
+        )
+        self.source_file = source_file
+        self.detail = detail
+
+
+def _ocr_text_is_empty(extracted: dict[str, Any]) -> bool:
+    """True when OCR produced effectively no text across all pages."""
+    return not "".join(p.get("text", "") for p in extracted.get("pages", [])).strip()
+
+
 class PdfPasswordProvider:
     """Prompt for protected PDFs and reuse successful passwords during one run."""
 
@@ -851,12 +870,16 @@ def parse_pdf(pdf_path: Path, password: str | None = None, ocr_mode: str = "auto
     except Exception as exc:
         rule_document["confidence_notes"].append(f"OCR fallback failed: {exc}")
         if rule_classification["status"] == "rejected":
-            raise NonSalarySlipError(original_name, rule_classification)
+            # Text layer too weak to classify on its own and OCR failed — this
+            # is an OCR problem, not a 'not a salary slip' verdict.
+            raise OcrUnavailableError(original_name, str(exc)) from exc
         return attach_classification(rule_result, rule_classification)
 
     ocr_classification = classify_salary_slip(ocr_result["extracted"])
     if ocr_classification["status"] == "rejected":
         if rule_classification["status"] == "rejected":
+            if _ocr_text_is_empty(ocr_result["extracted"]):
+                raise OcrUnavailableError(original_name, "the OCR service returned no readable text")
             raise NonSalarySlipError(original_name, ocr_classification)
         return attach_classification(rule_result, rule_classification)
 
