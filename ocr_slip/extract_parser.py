@@ -332,6 +332,12 @@ def text_quality_needs_ocr(extracted: dict[str, Any], config: ParserConfig | Non
     )
 
 
+# A queued (amount-less) label is only paired with a later bare-number line when
+# the number shows up within this many lines. Stops a blank row (e.g. an empty
+# "Tunjangan BPJS —") from absorbing a far-away stray number as a phantom item.
+_MAX_PENDING_LABEL_GAP = 2
+
+
 class SalarySlipAnalyzer:
     """Infer payroll fields from extracted text."""
 
@@ -398,21 +404,30 @@ class SalarySlipAnalyzer:
 
     def _extract_line_items(self, lines: list[dict[str, Any]]) -> list[LineItem]:
         section: str | None = None
-        pending_labels: deque[tuple[str, str | None, dict[str, Any]]] = deque()
+        pending_labels: deque[tuple[str, str | None, dict[str, Any], int]] = deque()
         items: list[LineItem] = []
 
-        for line_info in lines:
+        for index, line_info in enumerate(lines):
             line = line_info["text"]
             matches = money_matches(line)
             detected_section = self._detect_section(line)
             if detected_section and (not matches or detected_section in {"mixed", "company_contributions"}):
+                if detected_section != section:
+                    # A new section header orphans labels still waiting for an
+                    # amount (they were blank rows) — drop them so a number in
+                    # the new section can't be attached to them.
+                    pending_labels.clear()
                 section = detected_section
+
+            # Forget queued labels whose amount never arrived on an adjacent line.
+            while pending_labels and index - pending_labels[0][3] > _MAX_PENDING_LABEL_GAP:
+                pending_labels.popleft()
 
             if not matches:
                 queued_label = self._label_from_amountless_line(line)
                 if queued_label:
                     pending_labels.append(
-                        (queued_label, self._classify_label(queued_label, section), line_info)
+                        (queued_label, self._classify_label(queued_label, section), line_info, index)
                     )
                 continue
 
@@ -476,7 +491,7 @@ class SalarySlipAnalyzer:
             match = matches[0]
             label = clean_label(line[: match.start()])
             if not label and pending_labels:
-                label, queued_section, _ = pending_labels.popleft()
+                label, queued_section, _, _ = pending_labels.popleft()
                 item_section = queued_section or self._classify_label(label, section)
             else:
                 item_section = self._classify_label(label, section)
