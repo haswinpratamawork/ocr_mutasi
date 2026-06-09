@@ -110,6 +110,22 @@ class LlmPostprocessIncentiveTests(unittest.TestCase):
         self.assertEqual(doc["incentive"], 0)
         self.assertEqual(doc["pokok"], 54438625)
 
+    def test_pokok_recovers_gaji_row_with_ocr_garbled_label(self):
+        # One "Gaji" label is OCR-garbled ("Gaii"), so the keyword scan misses
+        # its 17.503.500 row. With no real allowance, pokok must still equal the
+        # gross total (49.889.125), matching take-home — not 32.385.625.
+        page = (
+            "Gaji Penjualan Murni Es Kristal 11.256.750\n"
+            "Gaji Penjualan Dingin Es Bersama 21.128.875\n"
+            "Gaii Penjualan Murni Es Kristal 17.503.500\n"   # 'Gaji' -> 'Gaii'
+            "Total Penghasilan Bruto 49.889.125\n"
+        )
+        doc = {"pokok": 0, "incentive": 0, "deduction": 0,
+               "total_paid": 49889125, "institution_name": "", "confidence_notes": []}
+        postprocess_from_text(doc, page)
+        self.assertEqual(doc["pokok"], 49889125)
+        self.assertEqual(doc["incentive"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

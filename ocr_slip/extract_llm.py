@@ -254,15 +254,16 @@ def postprocess_from_text(doc: dict[str, Any], page_text: str) -> None:
     if bruto is not None:
         pokok = doc.get("pokok") or 0
         room = bruto - pokok
-        # When the base-salary (Gaji) rows already add up to (≈) the gross
-        # total, there is no room for an incentive — a number sitting on a
-        # tunjangan/bonus/lembur line is OCR noise, not a real allowance.
-        if room <= 10000:
-            doc["incentive"] = 0
-            if pokok and abs(pokok - bruto) <= 10000:
-                doc["pokok"] = bruto
-        else:
+        if incentive_candidate > 0 and room > 10000:
+            # A real allowance row exists and the gross leaves room for it.
             doc["incentive"] = min(incentive_candidate, room)
+        else:
+            # No genuine allowance → all gross income is base salary, so pokok
+            # is the gross total. This also recovers a Gaji row whose "Gaji"
+            # label the OCR garbled (otherwise pokok undercounts and wouldn't
+            # match take-home), and avoids a phantom incentive from OCR noise.
+            doc["incentive"] = 0
+            doc["pokok"] = bruto
     else:
         doc["incentive"] = incentive_candidate
 
