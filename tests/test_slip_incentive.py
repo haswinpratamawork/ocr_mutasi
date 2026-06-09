@@ -10,6 +10,7 @@ Run from the repo root:
 import unittest
 
 from ocr_slip.extract_parser import SalarySlipAnalyzer
+from ocr_slip.extract_llm import postprocess_from_text
 
 
 def _extracted(lines: list[str]) -> dict:
@@ -55,6 +56,43 @@ class IncentiveFalsePositiveTests(unittest.TestCase):
         ]
         summary = SalarySlipAnalyzer().analyze(_extracted(lines))
         self.assertEqual(summary.incentive_total, 500000)
+
+
+class LlmPostprocessIncentiveTests(unittest.TestCase):
+    """The LLM-fallback post-processing must not invent an incentive when the
+    Gaji rows already sum to the gross total (the Rp 100.600 / 205.100 bug)."""
+
+    BRISPOT = (
+        "PENERIMAAN\n"
+        "Gaji Penjualan Murni Es Kristal 11.256.750\n"
+        "Gaji Penjualan Dingin Es Bersama 21.128.875\n"
+        "Gaji Penjualan Murni Es Kristal 17.503.500\n"
+        "Tunjangan BPJS 100.600\n"            # OCR noise: a stray number on a dash row
+        "Lembur\n"
+        "Bonus / THR\n"
+        "Total Penghasilan Bruto 49.889.125\n"
+        "Total Pengurangan\n"
+        "TOTAL DITERIMA KARYAWAN 49.889.125\n"
+    )
+
+    def test_no_incentive_when_gaji_equals_bruto(self):
+        doc = {"pokok": 0, "incentive": 100600, "deduction": 0,
+               "total_paid": None, "institution_name": "", "confidence_notes": []}
+        postprocess_from_text(doc, self.BRISPOT)
+        self.assertEqual(doc["incentive"], 0)
+        self.assertEqual(doc["pokok"], 49889125)
+
+    def test_real_incentive_with_room_is_kept(self):
+        page = (
+            "PENERIMAAN\n"
+            "Gaji Pokok 5.000.000\n"
+            "Tunjangan Transport 500.000\n"
+            "Total Penghasilan Bruto 5.500.000\n"
+        )
+        doc = {"pokok": 0, "incentive": 0, "deduction": 0,
+               "total_paid": None, "institution_name": "", "confidence_notes": []}
+        postprocess_from_text(doc, page)
+        self.assertEqual(doc["incentive"], 500000)
 
 
 if __name__ == "__main__":
