@@ -30,10 +30,10 @@ cp .env.example .env
 $EDITOR .env       # fill in AZURE_OPENAI_*; defaults for OCR_SLIP_URL / OCR_MUTASI_URL are fine
 
 # 3. start the two upstream services + the matcher in separate shells
-#    (all from the repo root):
-#    Shell A:  .venv/bin/uvicorn ocr_mutasi.api:app --port 8300 --reload
-#    Shell B:  .venv/bin/uvicorn ocr_slip.app:app   --port 8200 --reload
-#    Shell C:  .venv/bin/uvicorn ocr_match.api:app  --port 8400 --reload
+#    (each run_api.sh cd's to the repo root, so run from anywhere):
+#    Shell A:  ./ocr_mutasi/run_api.sh --reload   # :8300
+#    Shell B:  ./ocr_slip/run_api.sh   --reload   # :8200
+#    Shell C:  ./ocr_match/run_api.sh  --reload   # :8400
 
 # 4. open the upload page
 open http://127.0.0.1:8400/upload

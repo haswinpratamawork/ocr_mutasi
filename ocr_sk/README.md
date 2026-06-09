@@ -16,8 +16,18 @@ shared `AZURE_OPENAI_*` keys).
 
 ## Run
 
-Run from the **repo root** (where the shared `.venv` and `.env` live), not from
-inside `ocr_sk/` — it's a package, importable only from the root:
+Easiest — use the bundled `run_api.sh`. It resolves the repo root, uses the
+shared `.venv`, and binds the right port; run it from anywhere and extra flags
+pass through:
+
+```bash
+./ocr_sk/run_api.sh            # start on :8100
+./ocr_sk/run_api.sh --reload   # dev auto-reload
+PORT=9000 ./ocr_sk/run_api.sh  # override via HOST=/PORT=
+```
+
+Or run uvicorn directly, **from the repo root** (it's a package, importable only
+from the root):
 
 ```bash
 .venv/bin/uvicorn ocr_sk.app:app --host 0.0.0.0 --port 8100 --reload

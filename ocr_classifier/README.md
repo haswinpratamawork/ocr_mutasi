@@ -29,14 +29,21 @@ PDF → POST {OCR_ENDPOINT_URL}?skip_orientation=…   (header X-API-Key, multip
 
 ## Run
 
-Run from the **repo root** (the parent of this folder — where the `.venv` and
-`.env` live), NOT from inside `ocr_classifier/`. `ocr_classifier` is a flat
-package at the repo root, so it's only importable when the repo root is the
-working directory — same as `ocr_mutasi`. Running from inside this folder
-fails with `ModuleNotFoundError: No module named 'ocr_classifier'`.
+Easiest — use the bundled `run_api.sh`. It resolves the repo root, uses the
+shared `.venv`, and binds the right port; run it from anywhere and extra flags
+pass through:
 
 ```bash
-cd /path/to/ocr_mutasi          # the repo root, NOT ocr_mutasi/ocr_classifier
+./ocr_classifier/run_api.sh            # start on :8000
+./ocr_classifier/run_api.sh --reload   # dev auto-reload
+PORT=9000 ./ocr_classifier/run_api.sh  # override via HOST=/PORT=
+```
+
+Or run uvicorn directly — but **from the repo root** (this is a flat package,
+importable only when the repo root is the working directory; running from inside
+`ocr_classifier/` fails with `ModuleNotFoundError: No module named 'ocr_classifier'`):
+
+```bash
 .venv/bin/uvicorn ocr_classifier.api:app --host 0.0.0.0 --port 8000 --reload
 ```
 

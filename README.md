@@ -107,8 +107,8 @@ Assumes macOS / Apple Silicon with Homebrew's Python 3.12 installed; adapt the P
 cp .env.example .env
 $EDITOR .env          # paste real AZURE_OPENAI_* values
 
-# 3. Start the server
-.venv/bin/uvicorn ocr_mutasi.api:app --host 127.0.0.1 --port 8300 --reload
+# 3. Start the server (run_api.sh cd's to the repo root and binds :8300)
+./ocr_mutasi/run_api.sh --reload
 
 # 4. (in another shell) Hit the recommended batch endpoint with a folder of PDFs
 curl -X POST $(for f in mutasi_haswin/Mutasi_*.pdf; do echo -n "-F files=@$f "; done) \
@@ -210,10 +210,13 @@ Expected: `OK — BCA 134 tx (DB=131, CR=3)`.
 ### 4.1 Development (auto-reload)
 
 ```bash
-.venv/bin/uvicorn ocr_mutasi.api:app --host 127.0.0.1 --port 8300 --reload
+./ocr_mutasi/run_api.sh --reload     # shortcut — cd's to repo root, binds :8300
+# equivalent explicit command:
+.venv/bin/uvicorn ocr_mutasi.api:app --host 0.0.0.0 --port 8300 --reload
 ```
 
 `--reload` watches your source files and restarts on changes. Use only in dev.
+`run_api.sh` accepts `HOST=` / `PORT=` overrides and passes extra flags through.
 
 ### 4.2 Production-like
 
