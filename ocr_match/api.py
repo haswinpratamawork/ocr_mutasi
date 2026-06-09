@@ -277,7 +277,7 @@ _UPLOAD_PAGE = """<!doctype html>
 <body>
   <div class="container">
     <h1>OCR Match — Salary slip ↔ bank mutation</h1>
-    <p class="tagline">Upload your salary slips on the left and bank statements on the right. The matcher pairs them by month, amount (±15%) and fuzzy company-name match (e.g. <em>Alsut</em> → <em>Alam Sutera</em>). &nbsp;·&nbsp; <a href="/docs">Swagger UI</a></p>
+    <p class="tagline">Upload your salary slips on the left and bank statements on the right. The matcher pairs each slip to the bank credit with the same amount, preferring the payroll month and the month after it (to allow for payroll lag). &nbsp;·&nbsp; <a href="/docs">Swagger UI</a></p>
 
     <form id="form" class="card">
       <div class="drops">
