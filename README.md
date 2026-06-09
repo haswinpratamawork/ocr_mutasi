@@ -82,6 +82,32 @@ Each service serves interactive API docs at `/docs` and a browser upload page
 (`/upload`, or `/web` for `ocr_sk`). `ocr_match` needs its two upstreams
 (`ocr_mutasi` on 8300 and `ocr_slip` on 8200) running.
 
+## Running with Docker
+
+Each service has a `Dockerfile` (built from the **repo root** so it can pull in
+`ocr_common`), and `docker-compose.yml` runs all five together.
+
+```bash
+cp .env.example .env     # fill in AZURE_OPENAI_* and OCR_API_KEY (not baked into images)
+docker compose up --build
+```
+
+That builds and starts all five on the same host ports as local runs
+(classifier 8000, sk 8100, slip 8200, mutasi 8300, match 8400), each with a
+`/health` healthcheck. Inside the compose network `ocr_match` reaches the others
+by service name (`OCR_SLIP_URL=http://ocr_slip:8200`, `OCR_MUTASI_URL=http://ocr_mutasi:8300`).
+
+Build/run a single service:
+
+```bash
+docker build -f ocr_classifier/Dockerfile -t ocr_classifier .
+docker run --rm -p 8000:8000 --env-file .env ocr_classifier
+```
+
+Notes:
+- Secrets are passed at runtime via `--env-file` / compose `env_file` — never baked into an image (and `.dockerignore` blocks `.env`, PDFs, and run artifacts).
+- The PaddleOCR service (`OCR_ENDPOINT_URL`) is external; the Docker host must be able to reach it (e.g. on the corporate network).
+
 ## Configuration (`.env`)
 
 A single repo-root `.env` is shared by all services (see [`.env.example`](.env.example)):
@@ -98,14 +124,17 @@ A single repo-root `.env` is shared by all services (see [`.env.example`](.env.e
 
 ```
 ocr_mutasi/                 ← repo root (shared .venv, .env, requirements.txt, .gitignore)
-├── ocr_classifier/         ← service package + run_api.sh + README
-├── ocr_sk/                 ← service package + web-ui/ + run_api.sh + README
-├── ocr_slip/               ← service package + run_api.sh + README
-├── ocr_mutasi/             ← service package + parsers/ + run_api.sh + README
-├── ocr_match/              ← service package + run_api.sh + README
+├── ocr_classifier/         ← service package + Dockerfile + run_api.sh + README
+├── ocr_sk/                 ← service package + web-ui/ + Dockerfile + run_api.sh + README
+├── ocr_slip/               ← service package + Dockerfile + run_api.sh + README
+├── ocr_mutasi/             ← service package + parsers/ + Dockerfile + run_api.sh + README
+├── ocr_match/              ← service package + Dockerfile + run_api.sh + README
+├── ocr_common/             ← shared PaddleOCR client (used by slip/sk/mutasi)
 ├── docs/
 │   ├── architecture.md             ← ocr_mutasi internals & design
 │   └── superpowers/specs|plans/    ← design specs & implementation plans
+├── docker-compose.yml      ← run all five services together
+├── .dockerignore
 ├── requirements.txt
 ├── .env.example
 └── README.md               ← this file

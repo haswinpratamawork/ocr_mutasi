@@ -1,0 +1,50 @@
+# Keep the build context small and free of secrets / PII.
+
+# VCS & tooling
+.git
+.gitignore
+.github
+.claude
+.agents
+.qodo
+skills-lock.json
+
+# Virtualenvs / caches
+.venv
+**/.venv
+venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Secrets — never bake .env into an image (pass env at runtime). Keep the example.
+.env
+.env.*
+!.env.example
+
+# PII: documents and per-request run artifacts must never enter an image.
+*.pdf
+user_data
+**/input/*.pdf
+**/runs
+**/output
+**/web_output
+mutasi_*
+slip_*
+sample_document_analisa_kredit
+sample_bca.pdf
+sample_mandiri.pdf
+contoh_mutasi.pdf
+
+# Not needed at runtime
+docs
+tests
+**/README.md
+**/*.md
+**/run_api.sh
+Dockerfile
+**/Dockerfile
+docker-compose.yml
+.DS_Store

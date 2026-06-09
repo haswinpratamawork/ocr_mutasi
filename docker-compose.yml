@@ -1,0 +1,55 @@
+# Run all five OCR services together for API testing.
+#
+#   cp .env.example .env      # fill in AZURE_OPENAI_* and OCR_API_KEY
+#   docker compose up --build
+#
+# Each service is reachable on its host port (see below) and serves /docs and
+# /upload. All five share the repo-root .env (AZURE_OPENAI_*, OCR_ENDPOINT_URL,
+# etc.). ocr_match talks to ocr_slip/ocr_mutasi over the compose network.
+
+services:
+  ocr_classifier:
+    build: { context: ., dockerfile: ocr_classifier/Dockerfile }
+    image: ocr_classifier
+    container_name: ocr_classifier
+    ports: ["8000:8000"]
+    env_file: [.env]
+    restart: unless-stopped
+
+  ocr_sk:
+    build: { context: ., dockerfile: ocr_sk/Dockerfile }
+    image: ocr_sk
+    container_name: ocr_sk
+    ports: ["8100:8100"]
+    env_file: [.env]
+    restart: unless-stopped
+
+  ocr_slip:
+    build: { context: ., dockerfile: ocr_slip/Dockerfile }
+    image: ocr_slip
+    container_name: ocr_slip
+    ports: ["8200:8200"]
+    env_file: [.env]
+    restart: unless-stopped
+
+  ocr_mutasi:
+    build: { context: ., dockerfile: ocr_mutasi/Dockerfile }
+    image: ocr_mutasi
+    container_name: ocr_mutasi
+    ports: ["8300:8300"]
+    env_file: [.env]
+    restart: unless-stopped
+
+  ocr_match:
+    build: { context: ., dockerfile: ocr_match/Dockerfile }
+    image: ocr_match
+    container_name: ocr_match
+    ports: ["8400:8400"]
+    env_file: [.env]
+    # Reach the upstream services by their compose DNS names, not 127.0.0.1
+    # (which inside this container would point at ocr_match itself).
+    environment:
+      - OCR_SLIP_URL=http://ocr_slip:8200
+      - OCR_MUTASI_URL=http://ocr_mutasi:8300
+    depends_on: [ocr_slip, ocr_mutasi]
+    restart: unless-stopped
