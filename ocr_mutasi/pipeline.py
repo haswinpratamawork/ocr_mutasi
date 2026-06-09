@@ -21,12 +21,43 @@ from .models import (
     ExtractionResponse,
     FileExtraction,
 )
+from .ocr_fallback import ocr_fallback_extract
 from .parsers import SUPPORTED_BANKS, detect_bank, get_parser
 from .pdf_extractor import extract_chunks
+
+_UNSUPPORTED = (
+    "PDF doesn't match any known bank layout (supported: BCA Rekening Tahapan, "
+    "BRI BritAma, Mandiri Tabungan, Permata Rekening Koran, Sinarmas Tabungan)."
+)
 
 
 class UnsupportedBankError(ValueError):
     """Raised when the PDF doesn't match any known bank layout."""
+
+
+def _ocr_fallback(
+    pdf_bytes: bytes,
+    password: str | None,
+    *,
+    filename: str | None = None,
+):
+    """OCR + LLM fallback for a PDF with no recognised bank layout.
+
+    Returns ``(account, transactions, balance_warnings, parse_warnings, pages)``.
+    Raises ``UnsupportedBankError`` if the OCR service is unavailable or the
+    OCR/LLM pass yields no transactions.
+    """
+    from ocr_common.paddle_ocr import PaddleOcrError
+
+    prefix = f"{filename}: " if filename else ""
+    try:
+        account, transactions, parse_warnings = ocr_fallback_extract(pdf_bytes, password=password)
+    except PaddleOcrError as exc:
+        raise UnsupportedBankError(f"{prefix}{_UNSUPPORTED} OCR fallback unavailable: {exc}") from exc
+    except ValueError as exc:
+        raise UnsupportedBankError(f"{prefix}{_UNSUPPORTED} {exc}") from exc
+    pages = max((t.page for t in transactions), default=1)
+    return account, transactions, [], parse_warnings, pages
 
 
 def run(
@@ -44,15 +75,20 @@ def run(
     chunks = extract_chunks(pdf_bytes, password=password)
     bank = detect_bank(chunks)
     if bank == "UNKNOWN":
-        raise UnsupportedBankError(
-            "PDF doesn't match any known bank layout (supported: BCA Rekening Tahapan, BRI BritAma, Mandiri Tabungan, Permata Rekening Koran, Sinarmas Tabungan)."
+        # No known bank layout (often a scanned statement) — OCR + LLM fallback.
+        account, transactions, balance_warnings, parse_warnings, pages = _ocr_fallback(
+            pdf_bytes, password
         )
-    parser = get_parser(bank)
+    else:
+        parser = get_parser(bank)
+        account = parser.parse_header(chunks)
+        parsed = parser.parse_transactions(chunks, account)
+        transactions = parsed.transactions
+        balance_warnings = parsed.balance_warnings
+        parse_warnings = parsed.parse_warnings
+        pages = max((c.page for c in chunks), default=0)
 
-    account = parser.parse_header(chunks)
-    parsed = parser.parse_transactions(chunks, account)
-
-    credits_only = [t for t in parsed.transactions if t.type == "CR"]
+    credits_only = [t for t in transactions if t.type == "CR"]
     if classify and credits_only:
         classified, classifier_err = classify_credits(credits_only)
         classifier_errors = [classifier_err] if classifier_err else []
@@ -60,18 +96,17 @@ def run(
         classified = [ClassifiedCredit(**t.model_dump()) for t in credits_only]
         classifier_errors = []
 
-    pages = max((c.page for c in chunks), default=0)
     return ExtractionResponse(
         account=account,
-        transactions=parsed.transactions,
+        transactions=transactions,
         credits=classified,
         audit=Audit(
             pages_processed=pages,
-            rows_detected=len(parsed.transactions),
+            rows_detected=len(transactions),
             credit_count=len(credits_only),
-            debit_count=sum(1 for t in parsed.transactions if t.type == "DB"),
-            balance_warnings=parsed.balance_warnings,
-            parse_warnings=parsed.parse_warnings,
+            debit_count=sum(1 for t in transactions if t.type == "DB"),
+            balance_warnings=balance_warnings,
+            parse_warnings=parse_warnings,
             classifier_errors=classifier_errors,
         ),
     )
@@ -86,25 +121,28 @@ def _extract_one(
     chunks = extract_chunks(pdf_bytes, password=password)
     bank = detect_bank(chunks)
     if bank == "UNKNOWN":
-        raise UnsupportedBankError(
-            f"{filename}: PDF doesn't match any known bank layout "
-            "(supported: BCA Rekening Tahapan, BRI BritAma, Mandiri Tabungan, Permata Rekening Koran, Sinarmas Tabungan)."
+        account, transactions, balance_warnings, parse_warnings, pages = _ocr_fallback(
+            pdf_bytes, password, filename=filename
         )
-    parser = get_parser(bank)
-    account = parser.parse_header(chunks)
-    parsed = parser.parse_transactions(chunks, account)
-    pages = max((c.page for c in chunks), default=0)
+    else:
+        parser = get_parser(bank)
+        account = parser.parse_header(chunks)
+        parsed = parser.parse_transactions(chunks, account)
+        transactions = parsed.transactions
+        balance_warnings = parsed.balance_warnings
+        parse_warnings = parsed.parse_warnings
+        pages = max((c.page for c in chunks), default=0)
     return FileExtraction(
         filename=filename,
         account=account,
-        transactions=parsed.transactions,
+        transactions=transactions,
         audit=Audit(
             pages_processed=pages,
-            rows_detected=len(parsed.transactions),
-            credit_count=sum(1 for t in parsed.transactions if t.type == "CR"),
-            debit_count=sum(1 for t in parsed.transactions if t.type == "DB"),
-            balance_warnings=parsed.balance_warnings,
-            parse_warnings=parsed.parse_warnings,
+            rows_detected=len(transactions),
+            credit_count=sum(1 for t in transactions if t.type == "CR"),
+            debit_count=sum(1 for t in transactions if t.type == "DB"),
+            balance_warnings=balance_warnings,
+            parse_warnings=parse_warnings,
         ),
     )
 

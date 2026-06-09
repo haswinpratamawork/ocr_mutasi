@@ -827,7 +827,7 @@ History. The first design called for PaddleOCR; we then discovered the source PD
 Yes — Mandiri (v0.5), Permata (v0.9), and Sinarmas (v0.10) were each one-file changes. See §11.3 and [architecture §17](../docs/architecture.md#17-extending-the-system) for the pattern.
 
 **Q. Do scanned PDFs work?**
-No. If your inputs are photographs or scans without a text layer, this service won't work. Adding OCR fallback (PaddleOCR / Tesseract) is on the roadmap but not implemented in v1.
+Yes, via a fallback. Digital statements (with a text layer) go through the fast, deterministic bank parsers. When no known bank layout matches — typically a scan/photo with no text layer — the pipeline OCRs the PDF through the shared **PaddleOCR service** (`ocr_common.paddle_ocr`) and asks the LLM to extract the transaction rows. Such results carry `account.bank = "OCR"` and a `parse_warnings` note. Deterministic parsing is always preferred; OCR + LLM is best-effort.
 
 **Q. Is debit data sent to the LLM?**
 No. Only credit rows (transactions with `type == "CR"`) are sent for classification. Debits are extracted and returned in `transactions` but never leave the local pipeline.

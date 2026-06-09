@@ -89,8 +89,7 @@ A single repo-root `.env` is shared by all services (see [`.env.example`](.env.e
 | Keys | Used by | Purpose |
 |---|---|---|
 | `AZURE_OPENAI_*` | classifier, mutasi, slip, sk, match | Shared LLM credentials (Azure OpenAI) |
-| `OCR_ENDPOINT_URL`, `OCR_API_KEY`, `OCR_SKIP_ORIENTATION` | classifier | The PaddleOCR markdown service |
-| `OCR_LANGUAGE`, `OCR_SCALE`, `OCR_PSM`, `OCR_OEM`, `OCR_BINARIZE` | slip, sk | Local Tesseract OCR-fallback tuning |
+| `OCR_ENDPOINT_URL`, `OCR_API_KEY`, `OCR_SKIP_ORIENTATION`, `OCR_TIMEOUT_S` | classifier, slip, sk, mutasi | The shared PaddleOCR service (the single OCR backend) |
 | `KETERANGAN_KERJA_FALLBACK` | sk | Enable the LLM text fallback |
 | `OCR_*_URL` | match | Service-URL registry (`ocr_match` consumes `OCR_SLIP_URL` / `OCR_MUTASI_URL`) |
 | `MAX_PDF_BYTES`, `MAX_FILES`, `MAX_CLASSIFY_CHARS`, `BATCH_OCR_CONCURRENCY`, `LLM_REQUEST_TIMEOUT_S` | various | Limits |
@@ -118,9 +117,8 @@ Each service is a **flat package run from this root** (e.g. `ocr_mutasi.api:app`
 
 ## External dependencies
 
-- **Azure OpenAI** — the LLM used for classification and text-field fallback.
-- **PaddleOCR markdown service** — the OCR backend `ocr_classifier` posts documents to (`OCR_ENDPOINT_URL`).
-- **Tesseract** + Indonesian language data (`brew install tesseract tesseract-lang`) — the local OCR fallback for scanned slips / letters in `ocr_slip` and `ocr_sk`.
+- **Azure OpenAI** — the LLM used for classification, text-field fallback, and OCR transaction extraction.
+- **PaddleOCR service** (`OCR_ENDPOINT_URL`) — the single OCR backend for the whole repo: `ocr_classifier` posts every document to it, and `ocr_slip` / `ocr_sk` / `ocr_mutasi` call it (via `ocr_common.paddle_ocr`) when their text-layer parser falls short. No local OCR engine is required.
 
 ## Data privacy
 

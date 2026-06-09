@@ -6,8 +6,8 @@ certificate / appointment letter) PDFs into structured JSON. Vendored from
 and adapted to the monorepo's layout.
 
 Pipeline: deterministic `pypdfium2` text extraction → rule-based classifier →
-Tesseract OCR fallback for scanned PDFs → optional LLM text fallback for
-missing fields.
+**PaddleOCR-service** fallback for scanned PDFs (shared `ocr_common` client) →
+optional LLM text fallback for missing fields.
 
 It is a sibling of `ocr_mutasi` (8300), `ocr_slip` (8200), `ocr_match` (8400),
 and `ocr_classifier` (8000), and runs on **port 8100**. It shares the repo-root
@@ -68,15 +68,10 @@ Reuses the shared `AZURE_OPENAI_*` keys. Optional tunables (defaults shown):
 ```
 # LLM text fallback for missing fields
 KETERANGAN_KERJA_FALLBACK=true
-
-# Tesseract OCR (shared with ocr_slip)
-OCR_LANGUAGE=ind+eng
-OCR_SCALE=3.0
-OCR_PSM=6
-OCR_OEM=1
-OCR_BINARIZE=true
 ```
 
-The OCR path uses the Indonesian Tesseract language data (`ind`); install it
-(`brew install tesseract-lang`) for best accuracy. It degrades to English if
-`ind` is not present.
+When the text layer is too weak, the parser falls back to the shared
+**PaddleOCR service** (configured by `OCR_ENDPOINT_URL` / `OCR_API_KEY` in the
+root `.env`) via `ocr_common.paddle_ocr` — the same OCR backend every service
+uses. No local OCR engine is required.
+

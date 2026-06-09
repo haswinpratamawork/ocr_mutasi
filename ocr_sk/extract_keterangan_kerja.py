@@ -317,11 +317,11 @@ def parse_pdf(pdf_path: Path, password: str | None = None) -> dict[str, Any]:
 
     if text_quality_needs_ocr(extracted, config):
         try:
-            from .extract_ocr import TesseractOcrExtractor
+            from ocr_common.paddle_ocr import extract_pages
 
-            used_extraction = TesseractOcrExtractor().extract(pdf_path, password=password)
-        except RuntimeError as exc:
-            extracted.setdefault("warnings", []).append(str(exc))
+            used_extraction = extract_pages(pdf_path, password=password)
+        except Exception as exc:  # OCR service unreachable/errored — keep the text-layer extraction
+            extracted.setdefault("warnings", []).append(f"OCR fallback failed: {exc}")
             used_extraction = extracted
 
     classification = classify_employment_certificate(used_extraction)
