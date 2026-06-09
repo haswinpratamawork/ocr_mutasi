@@ -29,10 +29,10 @@ class Settings(BaseSettings):
 
     # Service
     app_host: str = "0.0.0.0"
-    # NB: run with an explicit `--port 8300`. The repo-root .env sets
-    # APP_PORT=8000 for ocr_mutasi, which would otherwise override this
-    # default when the file is shared; the CLI flag is what actually binds.
-    app_port: int = 8300
+    # The actual bind port comes from run_api.sh / the uvicorn --port flag, not
+    # this default (the shared root .env may carry an APP_PORT for another
+    # service). ocr_classifier runs on 8000.
+    app_port: int = 8000
 
     # Limits
     llm_request_timeout_s: float = 120.0

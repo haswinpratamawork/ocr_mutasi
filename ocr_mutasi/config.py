@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # Service
     app_host: str = "0.0.0.0"
-    app_port: int = 8000
+    app_port: int = 8300
 
     # Limits
     # Default 120s — the batch endpoint doubles this for cross-month calls,

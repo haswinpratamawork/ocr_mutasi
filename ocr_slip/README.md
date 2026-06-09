@@ -95,22 +95,22 @@ PORT=5051 python3 web_app.py
 ## Local FastAPI Service
 
 `ocr_slip` is a package — run it from the **repo root** (where the shared
-`.venv` and `.env` live), on port 8100:
+`.venv` and `.env` live), on port 8200:
 
 ```bash
-.venv/bin/uvicorn ocr_slip.app:app --host 0.0.0.0 --port 8100 --reload
+.venv/bin/uvicorn ocr_slip.app:app --host 0.0.0.0 --port 8200 --reload
 ```
 
 Open the interactive API docs:
 
 ```text
-http://127.0.0.1:8100/docs
+http://127.0.0.1:8200/docs
 ```
 
 Parse one or more PDFs:
 
 ```bash
-curl -X POST "http://127.0.0.1:8100/parse?ocr=auto" \
+curl -X POST "http://127.0.0.1:8200/parse?ocr=auto" \
   -F "files=@/path/to/salary-slip.pdf"
 ```
 

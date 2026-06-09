@@ -9,8 +9,8 @@ Pipeline: deterministic `pypdfium2` text extraction → rule-based classifier �
 Tesseract OCR fallback for scanned PDFs → optional LLM text fallback for
 missing fields.
 
-It is a sibling of `ocr_mutasi` (8000), `ocr_slip` (8100), `ocr_match` (8200),
-and `ocr_classifier` (8300), and runs on **port 8400**. It shares the repo-root
+It is a sibling of `ocr_mutasi` (8300), `ocr_slip` (8200), `ocr_match` (8400),
+and `ocr_classifier` (8000), and runs on **port 8100**. It shares the repo-root
 `.venv`, `requirements.txt`, and `.env` (its Azure credentials come from the
 shared `AZURE_OPENAI_*` keys).
 
@@ -20,11 +20,11 @@ Run from the **repo root** (where the shared `.venv` and `.env` live), not from
 inside `ocr_sk/` — it's a package, importable only from the root:
 
 ```bash
-.venv/bin/uvicorn ocr_sk.app:app --host 0.0.0.0 --port 8400 --reload
+.venv/bin/uvicorn ocr_sk.app:app --host 0.0.0.0 --port 8100 --reload
 ```
 
-- Browser upload page: <http://localhost:8400/web> (the bare URL redirects here)
-- Swagger UI: <http://localhost:8400/docs>
+- Browser upload page: <http://localhost:8100/web> (the bare URL redirects here)
+- Swagger UI: <http://localhost:8100/docs>
 
 ## Endpoints
 
@@ -37,7 +37,7 @@ inside `ocr_sk/` — it's a package, importable only from the root:
 
 ```bash
 curl -s -F "files=@/path/to/surat-keterangan-kerja.pdf" \
-  "http://localhost:8400/parse" | python -m json.tool
+  "http://localhost:8100/parse" | python -m json.tool
 ```
 
 Parsed JSON is also written under `ocr_sk/output/` (`extracted.json`,

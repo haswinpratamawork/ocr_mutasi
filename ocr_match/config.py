@@ -16,12 +16,12 @@ class Settings(BaseSettings):
     azure_openai_deployment: str = "gpt-4.1-mini"
 
     # Upstream services
-    ocr_slip_url: str = "http://127.0.0.1:8100"
-    ocr_mutasi_url: str = "http://127.0.0.1:8000"
+    ocr_slip_url: str = "http://127.0.0.1:8200"
+    ocr_mutasi_url: str = "http://127.0.0.1:8300"
 
     # Service
     app_host: str = "0.0.0.0"
-    app_port: int = 8200
+    app_port: int = 8400
 
     # Timeouts & limits
     llm_request_timeout_s: float = 60.0  # reserved for a future LLM-tiebreak path

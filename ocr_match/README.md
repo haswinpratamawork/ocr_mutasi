@@ -4,9 +4,9 @@
 
 | Service | Port | Role |
 |---|---|---|
-| `ocr_mutasi` | `8000` | Parses bank-statement PDFs, classifies credits into Gaji / THR / Bonus / Insentif / Lainnya |
-| `ocr_slip`   | `8100` | Parses salary-slip PDFs into worker / institution / take-home / pokok / tax / incentive / deduction |
-| **`ocr_match`** *(this service)* | `8200` | **Pairs the two** via an LLM matcher with hard rules + fuzzy company-name fallback |
+| `ocr_mutasi` | `8300` | Parses bank-statement PDFs, classifies credits into Gaji / THR / Bonus / Insentif / Lainnya |
+| `ocr_slip`   | `8200` | Parses salary-slip PDFs into worker / institution / take-home / pokok / tax / incentive / deduction |
+| **`ocr_match`** *(this service)* | `8400` | **Pairs the two** via an LLM matcher with hard rules + fuzzy company-name fallback |
 
 The design spec is in [`docs/superpowers/specs/2026-06-02-ocr-match-design.md`](../docs/superpowers/specs/2026-06-02-ocr-match-design.md).
 
@@ -31,12 +31,12 @@ $EDITOR .env       # fill in AZURE_OPENAI_*; defaults for OCR_SLIP_URL / OCR_MUT
 
 # 3. start the two upstream services + the matcher in separate shells
 #    (all from the repo root):
-#    Shell A:  .venv/bin/uvicorn ocr_mutasi.api:app --port 8000 --reload
-#    Shell B:  .venv/bin/uvicorn ocr_slip.app:app   --port 8100 --reload
-#    Shell C:  .venv/bin/uvicorn ocr_match.api:app  --port 8200 --reload
+#    Shell A:  .venv/bin/uvicorn ocr_mutasi.api:app --port 8300 --reload
+#    Shell B:  .venv/bin/uvicorn ocr_slip.app:app   --port 8200 --reload
+#    Shell C:  .venv/bin/uvicorn ocr_match.api:app  --port 8400 --reload
 
 # 4. open the upload page
-open http://127.0.0.1:8200/upload
+open http://127.0.0.1:8400/upload
 ```
 
 You can also use curl. The endpoint takes two file groups (`slips` and `mutations`):
@@ -45,7 +45,7 @@ You can also use curl. The endpoint takes two file groups (`slips` and `mutation
 curl -X POST \
   $(for f in /path/to/slips/*.pdf;     do echo -n "-F slips=@$f "; done) \
   $(for f in /path/to/statements/*.pdf; do echo -n "-F mutations=@$f "; done) \
-  http://127.0.0.1:8200/api/v1/match | jq .audit
+  http://127.0.0.1:8400/api/v1/match | jq .audit
 ```
 
 ---
@@ -162,10 +162,10 @@ Loaded once at startup via `pydantic-settings`. Defaults in `config.py`; overrid
 | `AZURE_OPENAI_API_KEY` | — | API key *(required)* |
 | `AZURE_OPENAI_API_VERSION` | `2025-01-01-preview` | API version |
 | `AZURE_OPENAI_DEPLOYMENT` | `gpt-4.1-mini` | Deployment name |
-| `OCR_SLIP_URL` | `http://127.0.0.1:8100` | Base URL of the salary-slip parser |
-| `OCR_MUTASI_URL` | `http://127.0.0.1:8000` | Base URL of the bank-statement parser |
+| `OCR_SLIP_URL` | `http://127.0.0.1:8200` | Base URL of the salary-slip parser |
+| `OCR_MUTASI_URL` | `http://127.0.0.1:8300` | Base URL of the bank-statement parser |
 | `APP_HOST` | `0.0.0.0` | Bind address |
-| `APP_PORT` | `8200` | Bind port |
+| `APP_PORT` | `8400` | Bind port |
 | `LLM_REQUEST_TIMEOUT_S` | `60` | Reserved for a future LLM tie-break path; not called in v0.2 |
 | `UPSTREAM_TIMEOUT_S` | `120` | Upstream HTTP call timeout |
 | `MATCH_AMOUNT_TOLERANCE_RP` | `1` | Absolute rupiah tolerance for the exact-match rule. Default is "essentially exact, with float-safety wiggle". Bump if your real-world data has cents-rounding or fee adjustments. |
@@ -198,7 +198,7 @@ ocr_mutasi/                      ← repo root (shared .env, requirements.txt, .
 
 | Symptom | HTTP | Likely cause | Fix |
 |---|---|---|---|
-| `ocr_slip not reachable at http://…:8100` | 503 | `ocr_slip` isn't running on the configured port | Start `ocr_slip` (see [`ocr_slip/README.md`](../ocr_slip/README.md)) or set `OCR_SLIP_URL` to where it actually runs |
+| `ocr_slip not reachable at http://…:8200` | 503 | `ocr_slip` isn't running on the configured port | Start `ocr_slip` (see [`ocr_slip/README.md`](../ocr_slip/README.md)) or set `OCR_SLIP_URL` to where it actually runs |
 | `ocr_mutasi not reachable …` | 503 | `ocr_mutasi` isn't running | Same — start it or update `OCR_MUTASI_URL` |
 | `Upstream … returned 4xx/5xx: …` | 502 | Upstream got the request but rejected it (often: malformed PDF) | Check the `body` field in the error |
 | `audit.matcher_errors` non-empty | 200 | The deterministic matcher cannot error; if this appears, it's an upstream-typed error misclassified — file a bug |

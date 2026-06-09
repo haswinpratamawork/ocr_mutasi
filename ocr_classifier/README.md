@@ -15,8 +15,8 @@ classifier: it does not parse fields or route the document onward.
 | `mutasi` | Mutasi Rekening / Rekening Koran (bank statement) |
 | `unknown` | none of the above / blank / illegible |
 
-It is a sibling of `ocr_mutasi` (8000), `ocr_slip` (8100), and `ocr_match`
-(8200), and runs on **port 8300**. It shares the repo-root `.env`,
+It is a sibling of `ocr_mutasi` (8300), `ocr_slip` (8200), and `ocr_match`
+(8400), and runs on **port 8000**. It shares the repo-root `.env`,
 `requirements.txt`, and `.venv`.
 
 ## How it works
@@ -37,11 +37,11 @@ fails with `ModuleNotFoundError: No module named 'ocr_classifier'`.
 
 ```bash
 cd /path/to/ocr_mutasi          # the repo root, NOT ocr_mutasi/ocr_classifier
-.venv/bin/uvicorn ocr_classifier.api:app --host 0.0.0.0 --port 8300 --reload
+.venv/bin/uvicorn ocr_classifier.api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-- Browser upload page: <http://localhost:8300/upload> (the bare URL redirects here)
-- Swagger UI: <http://localhost:8300/docs>
+- Browser upload page: <http://localhost:8000/upload> (the bare URL redirects here)
+- Swagger UI: <http://localhost:8000/docs>
 
 ## Endpoints
 
@@ -64,13 +64,13 @@ Each `classifier_*/` folder holds one sample PDF — substitute your own file pa
 ```bash
 # Single document
 curl -s -F "file=@classifier_kk/sample_kk.pdf" \
-  "http://localhost:8300/classify" | python -m json.tool
+  "http://localhost:8000/classify" | python -m json.tool
 
 # A batch (repeat -F file= ... once per document)
 curl -s \
   -F "files=@classifier_ktp/sample_ktp.pdf" \
   -F "files=@classifier_slip/sample_slip.pdf" \
-  "http://localhost:8300/classify-batch?include_text=false" | python -m json.tool
+  "http://localhost:8000/classify-batch?include_text=false" | python -m json.tool
 ```
 
 Example single result:
