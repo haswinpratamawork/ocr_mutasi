@@ -296,6 +296,17 @@ def postprocess_from_text(doc: dict[str, Any], page_text: str) -> None:
     elif diterima and (not bruto or diterima <= bruto * 3):
         doc["total_paid"] = diterima
 
+    # Final identity check: take_home = pokok + incentive - deduction, so
+    # pokok = take_home + deduction - incentive. When take-home and deduction
+    # are reliable, this recovers a pokok that OCR/LLM mis-read (e.g. grabbed a
+    # Tax line) — independent of the income-label keywords, which OCR can mangle.
+    take_home = doc.get("total_paid")
+    if take_home:
+        implied_pokok = take_home + (doc.get("deduction") or 0) - (doc.get("incentive") or 0)
+        if implied_pokok > 0 and abs((doc.get("pokok") or 0) - implied_pokok) > 10000:
+            doc["pokok"] = implied_pokok
+            doc["confidence_notes"].append("pokok reconciled from take-home + deduction - incentive.")
+
 
 def institution_from_text(page_text: str) -> str | None:
     ignored = ("foto", "slip", "periode", "penerimaan", "pengurangan", "total", "brispot")

@@ -126,6 +126,26 @@ class LlmPostprocessIncentiveTests(unittest.TestCase):
         self.assertEqual(doc["pokok"], 49889125)
         self.assertEqual(doc["incentive"], 0)
 
+    def test_pokok_reconciled_from_takehome_when_income_labels_garbled(self):
+        # William / Sinarmas slip: OCR mangled the income labels so 'gaji'/
+        # 'penghasilan' aren't found, and the LLM grabbed the bottom Tax line
+        # (154.408) as pokok. take-home (9.954.450) and deduction (100.550) are
+        # correct, so pokok must reconcile to 10.055.000.
+        page = (
+            "1NCOME / PENGHAS1LAN\n"            # garbled so keyword scan misses it
+            "Bas1c Salary / Ga]i Pokok 10,055,000\n"
+            "DEDUCTION\n"
+            "Jaminan Pensiun (1%) -100,550\n"
+            "TAKE HOME PAY\n"
+            "Amount transfered ... 9,954,450\n"
+            "NON CASH BENEFIT\n"
+            "Tax / Pajak 154,408\n"
+        )
+        doc = {"pokok": 154408, "incentive": 0, "deduction": 100550,
+               "total_paid": 9954450, "institution_name": "", "confidence_notes": []}
+        postprocess_from_text(doc, page)
+        self.assertEqual(doc["pokok"], 10055000)
+
 
 if __name__ == "__main__":
     unittest.main()
