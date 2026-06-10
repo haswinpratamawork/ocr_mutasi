@@ -27,13 +27,6 @@ class Settings(BaseSettings):
     ocr_skip_orientation: bool = False
     ocr_timeout_s: float = 120.0
 
-    # Service
-    app_host: str = "0.0.0.0"
-    # The actual bind port comes from run_api.sh / the uvicorn --port flag, not
-    # this default (the shared root .env may carry an APP_PORT for another
-    # service). ocr_classifier runs on 8000.
-    app_port: int = 8000
-
     # Limits
     llm_request_timeout_s: float = 120.0
     max_pdf_bytes: int = 20_000_000

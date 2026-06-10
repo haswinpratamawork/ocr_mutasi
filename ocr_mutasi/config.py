@@ -15,10 +15,6 @@ class Settings(BaseSettings):
     azure_openai_api_version: str = "2025-01-01-preview"
     azure_openai_deployment: str = "gpt-4.1-mini"
 
-    # Service
-    app_host: str = "0.0.0.0"
-    app_port: int = 8300
-
     # Limits
     # Default 120s — the batch endpoint doubles this for cross-month calls,
     # giving 240s. Real-world batches of ~300 credits (a busy account, 12
