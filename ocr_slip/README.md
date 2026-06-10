@@ -143,6 +143,20 @@ The compact response includes:
 
 See `API.md` for endpoint details and example responses.
 
+## Docker
+
+Build this service's image (from the **repo root**, so it can include the shared
+`ocr_common`) and run the container:
+
+```bash
+docker build -f ocr_slip/Dockerfile -t ocr_slip .
+docker run --rm -p 8200:8200 --env-file .env ocr_slip
+```
+
+The API is then at <http://localhost:8200/docs> (browser upload page at `/upload`).
+To run all five services together, use `docker compose up --build` from the repo
+root — see the [root README](../README.md#running-with-docker).
+
 ## Publishing to GitHub
 
 This repository is configured to avoid committing private PDF inputs or

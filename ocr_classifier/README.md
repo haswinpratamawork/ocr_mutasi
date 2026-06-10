@@ -50,6 +50,20 @@ importable only when the repo root is the working directory; running from inside
 - Browser upload page: <http://localhost:8000/upload> (the bare URL redirects here)
 - Swagger UI: <http://localhost:8000/docs>
 
+## Docker
+
+Build this service's image (from the **repo root**, so it can include the shared
+`ocr_common`) and run the container:
+
+```bash
+docker build -f ocr_classifier/Dockerfile -t ocr_classifier .
+docker run --rm -p 8000:8000 --env-file .env ocr_classifier
+```
+
+The API is then at <http://localhost:8000/docs> (browser upload page at `/upload`).
+To run all five services together, use `docker compose up --build` from the repo
+root — see the [root README](../README.md#running-with-docker).
+
 ## Endpoints
 
 | Method | Path | Body / params | Returns |

@@ -50,6 +50,24 @@ curl -X POST \
 
 ---
 
+## Docker
+
+Build this service's image (from the **repo root**, so it can include the shared
+`ocr_common`) and run the container:
+
+```bash
+docker build -f ocr_match/Dockerfile -t ocr_match .
+docker run --rm -p 8400:8400 --env-file .env \
+  -e OCR_SLIP_URL=http://host.docker.internal:8200 \
+  -e OCR_MUTASI_URL=http://host.docker.internal:8300 \
+  ocr_match
+```
+
+`ocr_match` calls `ocr_slip` and `ocr_mutasi`, so point `OCR_SLIP_URL` / `OCR_MUTASI_URL`
+at wherever they run. With `docker compose up --build` (from the repo root) this is
+wired automatically to the other containers — see the [root README](../README.md#running-with-docker).
+The API is then at <http://localhost:8400/docs> (browser upload page at `/upload`).
+
 ## How matching works
 
 ```

@@ -230,6 +230,17 @@ Expected: `OK — BCA 134 tx (DB=131, CR=3)`.
 
 The service has **no authentication and no rate limiting**. Deploy it behind a gateway (NGINX, Cloud Run, API Gateway, etc.) that handles both.
 
+### 4.4 Run with Docker
+
+Build this service's image (from the **repo root**, so it can include the shared `ocr_common`) and run the container:
+
+```bash
+docker build -f ocr_mutasi/Dockerfile -t ocr_mutasi .
+docker run --rm -p 8300:8300 --env-file .env ocr_mutasi
+```
+
+The API is then at <http://localhost:8300/docs> (browser upload page at `/upload`). To run all five services together, use `docker compose up --build` from the repo root — see the [root README](../README.md#running-with-docker).
+
 ---
 
 ## 5. API Reference

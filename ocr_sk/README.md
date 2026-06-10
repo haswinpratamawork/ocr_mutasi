@@ -36,6 +36,20 @@ from the root):
 - Browser upload page: <http://localhost:8100/upload> (the bare URL redirects here; `/web` is a legacy alias)
 - Swagger UI: <http://localhost:8100/docs>
 
+## Docker
+
+Build this service's image (from the **repo root**, so it can include the shared
+`ocr_common`) and run the container:
+
+```bash
+docker build -f ocr_sk/Dockerfile -t ocr_sk .
+docker run --rm -p 8100:8100 --env-file .env ocr_sk
+```
+
+The API is then at <http://localhost:8100/docs> (browser upload page at `/upload`).
+To run all five services together, use `docker compose up --build` from the repo
+root — see the [root README](../README.md#running-with-docker).
+
 ## Endpoints
 
 | Method | Path | Body | Returns |
