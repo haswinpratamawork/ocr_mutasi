@@ -1,0 +1,222 @@
+{
+  "info": {
+    "name": "OCR Services",
+    "description": "API collection for the five OCR microservices (ocr_classifier, ocr_sk, ocr_slip, ocr_mutasi, ocr_match).\n\nBase URLs are collection variables (default = the local Docker/compose ports). For the file fields ('file' / 'files' / 'slips' / 'mutations'), pick a PDF in the form-data tab. Disabled rows (password, etc.) are optional — enable them when needed.\n\nPorts: classifier 8000, sk 8100, slip 8200, mutasi 8300, match 8400.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "classifier_url", "value": "http://localhost:8000" },
+    { "key": "sk_url", "value": "http://localhost:8100" },
+    { "key": "slip_url", "value": "http://localhost:8200" },
+    { "key": "mutasi_url", "value": "http://localhost:8300" },
+    { "key": "match_url", "value": "http://localhost:8400" }
+  ],
+  "item": [
+    {
+      "name": "ocr_classifier (8000)",
+      "description": "Classify a document as ktp / kk / sk / slip / mutasi / unknown.",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{classifier_url}}/health", "host": ["{{classifier_url}}"], "path": ["health"] }
+          }
+        },
+        {
+          "name": "POST /classify (single document)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "", "description": "One document (PDF; images accepted)." }
+              ]
+            },
+            "url": {
+              "raw": "{{classifier_url}}/classify?include_text=false",
+              "host": ["{{classifier_url}}"],
+              "path": ["classify"],
+              "query": [{ "key": "include_text", "value": "false", "description": "Echo the extracted OCR text in the response." }]
+            }
+          }
+        },
+        {
+          "name": "POST /classify-batch (many documents)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "files", "type": "file", "src": "", "description": "Add one 'files' row per document." },
+                { "key": "files", "type": "file", "src": "", "disabled": true }
+              ]
+            },
+            "url": {
+              "raw": "{{classifier_url}}/classify-batch?include_text=false",
+              "host": ["{{classifier_url}}"],
+              "path": ["classify-batch"],
+              "query": [{ "key": "include_text", "value": "false" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ocr_sk (8100)",
+      "description": "Parse Surat Keterangan Kerja / Surat Pengangkatan.",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{sk_url}}/health", "host": ["{{sk_url}}"], "path": ["health"] }
+          }
+        },
+        {
+          "name": "POST /parse",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "files", "type": "file", "src": "", "description": "One or more PDFs (add more 'files' rows)." },
+                { "key": "files", "type": "file", "src": "", "disabled": true },
+                { "key": "password", "value": "", "type": "text", "disabled": true, "description": "Optional PDF password." }
+              ]
+            },
+            "url": { "raw": "{{sk_url}}/parse", "host": ["{{sk_url}}"], "path": ["parse"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ocr_slip (8200)",
+      "description": "Parse salary slips. 'ocr' selects the OCR-fallback mode.",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{slip_url}}/health", "host": ["{{slip_url}}"], "path": ["health"] }
+          }
+        },
+        {
+          "name": "POST /parse",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "files", "type": "file", "src": "", "description": "One or more salary-slip PDFs for one person." },
+                { "key": "files", "type": "file", "src": "", "disabled": true },
+                { "key": "ocr", "value": "auto", "type": "text", "description": "OCR fallback: auto | never | always." },
+                { "key": "password", "value": "", "type": "text", "disabled": true, "description": "Optional PDF password." }
+              ]
+            },
+            "url": { "raw": "{{slip_url}}/parse", "host": ["{{slip_url}}"], "path": ["parse"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ocr_mutasi (8300)",
+      "description": "Extract bank-statement transactions and classify credits.",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{mutasi_url}}/health", "host": ["{{mutasi_url}}"], "path": ["health"] }
+          }
+        },
+        {
+          "name": "POST /api/v1/mutations/extract (single PDF)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "", "description": "One bank-statement PDF." },
+                { "key": "password", "value": "", "type": "text", "disabled": true, "description": "Optional PDF password." }
+              ]
+            },
+            "url": {
+              "raw": "{{mutasi_url}}/api/v1/mutations/extract?classify=true",
+              "host": ["{{mutasi_url}}"],
+              "path": ["api", "v1", "mutations", "extract"],
+              "query": [{ "key": "classify", "value": "true", "description": "Run LLM classification on credit rows." }]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/mutations/extract-batch (many PDFs)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "files", "type": "file", "src": "", "description": "Add one 'files' row per statement (cross-month classification)." },
+                { "key": "files", "type": "file", "src": "", "disabled": true },
+                { "key": "password", "value": "", "type": "text", "disabled": true }
+              ]
+            },
+            "url": {
+              "raw": "{{mutasi_url}}/api/v1/mutations/extract-batch?classify=true",
+              "host": ["{{mutasi_url}}"],
+              "path": ["api", "v1", "mutations", "extract-batch"],
+              "query": [{ "key": "classify", "value": "true" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ocr_match (8400)",
+      "description": "Pair salary slips with their Gaji bank-credit rows.",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{match_url}}/health", "host": ["{{match_url}}"], "path": ["health"] }
+          }
+        },
+        {
+          "name": "POST /api/v1/match",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "slips", "type": "file", "src": "", "description": "Salary-slip PDFs (add more 'slips' rows)." },
+                { "key": "slips", "type": "file", "src": "", "disabled": true },
+                { "key": "mutations", "type": "file", "src": "", "description": "Bank-statement PDFs (add more 'mutations' rows)." },
+                { "key": "mutations", "type": "file", "src": "", "disabled": true },
+                { "key": "slip_password", "value": "", "type": "text", "disabled": true },
+                { "key": "mutation_password", "value": "", "type": "text", "disabled": true }
+              ]
+            },
+            "url": {
+              "raw": "{{match_url}}/api/v1/match",
+              "host": ["{{match_url}}"],
+              "path": ["api", "v1", "match"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

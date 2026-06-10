@@ -107,6 +107,8 @@ docker run --rm -p 8000:8000 --env-file .env ocr_classifier
 Notes:
 - Secrets are passed at runtime via `--env-file` / compose `env_file` — never baked into an image (and `.dockerignore` blocks `.env`, PDFs, and run artifacts).
 - The PaddleOCR service (`OCR_ENDPOINT_URL`) is external; the Docker host must be able to reach it (e.g. on the corporate network).
+- Each service's root (`/`) redirects to its API docs (`/docs`); the browser upload page stays at `/upload`.
+- **Postman:** import [`ocr-services.postman_collection.json`](ocr-services.postman_collection.json) — every endpoint, with per-service base-URL variables defaulting to the local ports.
 
 ## Configuration (`.env`)
 
