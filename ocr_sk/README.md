@@ -9,8 +9,8 @@ Pipeline: deterministic `pypdfium2` text extraction → rule-based classifier �
 **PaddleOCR-service** fallback for scanned PDFs (shared `ocr_common` client) →
 optional LLM text fallback for missing fields.
 
-It is a sibling of `ocr_mutasi` (8300), `ocr_slip` (8200), `ocr_match` (8400),
-and `ocr_classifier` (8000), and runs on **port 8100**. It shares the repo-root
+It is a sibling of `ocr_mutasi` (5004), `ocr_slip` (5003), `ocr_match` (5005),
+and `ocr_classifier` (5001), and runs on **port 5002**. It shares the repo-root
 `.venv`, `requirements.txt`, and `.env` (its Azure credentials come from the
 shared `AZURE_OPENAI_*` keys).
 
@@ -21,7 +21,7 @@ shared `.venv`, and binds the right port; run it from anywhere and extra flags
 pass through:
 
 ```bash
-./ocr_sk/run_api.sh            # start on :8100
+./ocr_sk/run_api.sh            # start on :5002
 ./ocr_sk/run_api.sh --reload   # dev auto-reload
 PORT=9000 ./ocr_sk/run_api.sh  # override via HOST=/PORT=
 ```
@@ -30,11 +30,11 @@ Or run uvicorn directly, **from the repo root** (it's a package, importable only
 from the root):
 
 ```bash
-.venv/bin/uvicorn ocr_sk.app:app --host 0.0.0.0 --port 8100 --reload
+.venv/bin/uvicorn ocr_sk.app:app --host 0.0.0.0 --port 5002 --reload
 ```
 
-- Browser upload page: <http://localhost:8100/upload> (the bare URL redirects here; `/web` is a legacy alias)
-- Swagger UI: <http://localhost:8100/docs>
+- Browser upload page: <http://localhost:5002/upload> (the bare URL redirects here; `/web` is a legacy alias)
+- Swagger UI: <http://localhost:5002/docs>
 
 ## Docker
 
@@ -43,10 +43,10 @@ Build this service's image (from the **repo root**, so it can include the shared
 
 ```bash
 docker build -f ocr_sk/Dockerfile -t ocr_sk .
-docker run --rm -p 8100:8100 --env-file .env ocr_sk
+docker run --rm -p 5002:5002 --env-file .env ocr_sk
 ```
 
-The API is then at <http://localhost:8100/docs> (browser upload page at `/upload`).
+The API is then at <http://localhost:5002/docs> (browser upload page at `/upload`).
 To run all five services together, use `docker compose up --build` from the repo
 root — see the [root README](../README.md#running-with-docker).
 
@@ -61,7 +61,7 @@ root — see the [root README](../README.md#running-with-docker).
 
 ```bash
 curl -s -F "files=@/path/to/surat-keterangan-kerja.pdf" \
-  "http://localhost:8100/parse" | python -m json.tool
+  "http://localhost:5002/parse" | python -m json.tool
 ```
 
 Parsed JSON is also written under `ocr_sk/output/` (`extracted.json`,

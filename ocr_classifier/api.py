@@ -3,7 +3,7 @@
 Exposes /classify (single) and /classify-batch (many) plus a health check
 and a browser upload page. Keep this thin — all logic lives in `pipeline`.
 
-Run from the repo root:  uvicorn ocr_classifier.api:app --port 8300 --reload
+Run from the repo root:  uvicorn ocr_classifier.api:app --port 5001 --reload
 """
 from __future__ import annotations
 

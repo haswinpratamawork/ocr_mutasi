@@ -13,32 +13,32 @@ and each exposes a FastAPI app (Swagger at `/docs`) plus a browser upload page.
 
 | Service | Port | What it does | Docs |
 |---|---|---|---|
-| **`ocr_classifier`** | 8000 | The front door: classify an uploaded document as `ktp` / `kk` / `sk` / `slip` / `mutasi` / `unknown`. Sends the file to a PaddleOCR service, then asks an LLM to label the text. | [`ocr_classifier/README.md`](ocr_classifier/README.md) |
-| **`ocr_sk`** | 8100 | Parse **Surat Keterangan Kerja / Surat Pengangkatan** (employment letters) into structured fields. | [`ocr_sk/README.md`](ocr_sk/README.md) |
-| **`ocr_slip`** | 8200 | Parse **salary slips** into worker / institution / take-home / pokok / tunjangan / potongan. | [`ocr_slip/README.md`](ocr_slip/README.md) |
-| **`ocr_mutasi`** | 8300 | Parse **bank-statement mutations** (BCA, BRI, Mandiri, Permata, Sinarmas) and classify each credit (Gaji / THR / Bonus / Insentif / Lainnya). | [`ocr_mutasi/README.md`](ocr_mutasi/README.md) |
-| **`ocr_match`** | 8400 | Reconcile salary slips against the bank's **`Gaji`** credit rows — confirms the declared income actually landed in the account. | [`ocr_match/README.md`](ocr_match/README.md) |
+| **`ocr_classifier`** | 5001 | The front door: classify an uploaded document as `ktp` / `kk` / `sk` / `slip` / `mutasi` / `unknown`. Sends the file to a PaddleOCR service, then asks an LLM to label the text. | [`ocr_classifier/README.md`](ocr_classifier/README.md) |
+| **`ocr_sk`** | 5002 | Parse **Surat Keterangan Kerja / Surat Pengangkatan** (employment letters) into structured fields. | [`ocr_sk/README.md`](ocr_sk/README.md) |
+| **`ocr_slip`** | 5003 | Parse **salary slips** into worker / institution / take-home / pokok / tunjangan / potongan. | [`ocr_slip/README.md`](ocr_slip/README.md) |
+| **`ocr_mutasi`** | 5004 | Parse **bank-statement mutations** (BCA, BRI, Mandiri, Permata, Sinarmas) and classify each credit (Gaji / THR / Bonus / Insentif / Lainnya). | [`ocr_mutasi/README.md`](ocr_mutasi/README.md) |
+| **`ocr_match`** | 5005 | Reconcile salary slips against the bank's **`Gaji`** credit rows — confirms the declared income actually landed in the account. | [`ocr_match/README.md`](ocr_match/README.md) |
 
 ## How they fit together
 
 ```
                  ┌──────────────────┐
    any document  │  ocr_classifier  │  "what is this?"  → ktp / kk / sk / slip / mutasi
-   ─────────────▶│      :8000       │
+   ─────────────▶│      :5001       │
                  └──────────────────┘
                           │ route by type
         ┌─────────────────┼───────────────────┬──────────────┐
         ▼                 ▼                    ▼              ▼
   ┌───────────┐    ┌───────────┐        ┌───────────┐   (ktp/kk handled
   │  ocr_sk   │    │ ocr_slip  │        │ ocr_mutasi│    by classifier today)
-  │  :8100    │    │  :8200    │        │  :8300    │
+  │  :5002    │    │  :5003    │        │  :5004    │
   └───────────┘    └─────┬─────┘        └─────┬─────┘
    employment           slips                 bank credits
    letters                └──────────┬─────────┘
                                      ▼
                               ┌───────────┐
                               │ ocr_match │  pairs each slip with its
-                              │  :8400    │  matching Gaji credit row
+                              │  :5005    │  matching Gaji credit row
                               └───────────┘
 ```
 
@@ -68,11 +68,11 @@ shared `.venv`, and binds the service's port — run it from anywhere; extra
 flags pass through:
 
 ```bash
-./ocr_classifier/run_api.sh    # http://localhost:8000
-./ocr_sk/run_api.sh            # http://localhost:8100
-./ocr_slip/run_api.sh          # http://localhost:8200
-./ocr_mutasi/run_api.sh        # http://localhost:8300
-./ocr_match/run_api.sh         # http://localhost:8400
+./ocr_classifier/run_api.sh    # http://localhost:5001
+./ocr_sk/run_api.sh            # http://localhost:5002
+./ocr_slip/run_api.sh          # http://localhost:5003
+./ocr_mutasi/run_api.sh        # http://localhost:5004
+./ocr_match/run_api.sh         # http://localhost:5005
 
 ./ocr_mutasi/run_api.sh --reload      # dev auto-reload
 PORT=9000 ./ocr_sk/run_api.sh         # override host/port via HOST=/PORT=
@@ -80,7 +80,7 @@ PORT=9000 ./ocr_sk/run_api.sh         # override host/port via HOST=/PORT=
 
 Each service serves interactive API docs at `/docs` and a browser upload page
 (`/upload`, or `/web` for `ocr_sk`). `ocr_match` needs its two upstreams
-(`ocr_mutasi` on 8300 and `ocr_slip` on 8200) running.
+(`ocr_mutasi` on 5004 and `ocr_slip` on 5003) running.
 
 ## Running with Docker
 
@@ -93,15 +93,15 @@ docker compose up --build
 ```
 
 That builds and starts all five on the same host ports as local runs
-(classifier 8000, sk 8100, slip 8200, mutasi 8300, match 8400), each with a
+(classifier 5001, sk 5002, slip 5003, mutasi 5004, match 5005), each with a
 `/health` healthcheck. Inside the compose network `ocr_match` reaches the others
-by service name (`OCR_SLIP_URL=http://ocr_slip:8200`, `OCR_MUTASI_URL=http://ocr_mutasi:8300`).
+by service name (`OCR_SLIP_URL=http://ocr_slip:5003`, `OCR_MUTASI_URL=http://ocr_mutasi:5004`).
 
 Build/run a single service:
 
 ```bash
 docker build -f ocr_classifier/Dockerfile -t ocr_classifier .
-docker run --rm -p 8000:8000 --env-file .env ocr_classifier
+docker run --rm -p 5001:5001 --env-file .env ocr_classifier
 ```
 
 Notes:

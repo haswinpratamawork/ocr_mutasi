@@ -17,8 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY ocr_common/ ./ocr_common/
 COPY ocr_mutasi/ ./ocr_mutasi/
 
-EXPOSE 8300
+EXPOSE 5004
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8300/health', timeout=3)" || exit 1
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5004/health', timeout=3)" || exit 1
 
-CMD ["uvicorn", "ocr_mutasi.api:app", "--host", "0.0.0.0", "--port", "8300"]
+CMD ["uvicorn", "ocr_mutasi.api:app", "--host", "0.0.0.0", "--port", "5004"]

@@ -19,8 +19,8 @@ COPY ocr_match/ ./ocr_match/
 
 # ocr_match calls ocr_slip + ocr_mutasi over HTTP. Point it at them via
 # OCR_SLIP_URL / OCR_MUTASI_URL at runtime (compose sets these to service DNS).
-EXPOSE 8400
+EXPOSE 5005
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8400/health', timeout=3)" || exit 1
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5005/health', timeout=3)" || exit 1
 
-CMD ["uvicorn", "ocr_match.api:app", "--host", "0.0.0.0", "--port", "8400"]
+CMD ["uvicorn", "ocr_match.api:app", "--host", "0.0.0.0", "--port", "5005"]

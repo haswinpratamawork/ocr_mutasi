@@ -6,4 +6,4 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 exec "$ROOT/.venv/bin/uvicorn" ocr_slip.app:app \
-  --host "${HOST:-0.0.0.0}" --port "${PORT:-8200}" "$@"
+  --host "${HOST:-0.0.0.0}" --port "${PORT:-5003}" "$@"

@@ -1,19 +1,19 @@
 {
   "info": {
     "name": "OCR Services",
-    "description": "API collection for the five OCR microservices (ocr_classifier, ocr_sk, ocr_slip, ocr_mutasi, ocr_match).\n\nBase URLs are collection variables (default = the local Docker/compose ports). For the file fields ('file' / 'files' / 'slips' / 'mutations'), pick a PDF in the form-data tab. Disabled rows (password, etc.) are optional — enable them when needed.\n\nPorts: classifier 8000, sk 8100, slip 8200, mutasi 8300, match 8400.",
+    "description": "API collection for the five OCR microservices (ocr_classifier, ocr_sk, ocr_slip, ocr_mutasi, ocr_match).\n\nBase URLs are collection variables (default = the local Docker/compose ports). For the file fields ('file' / 'files' / 'slips' / 'mutations'), pick a PDF in the form-data tab. Disabled rows (password, etc.) are optional — enable them when needed.\n\nPorts: classifier 5001, sk 5002, slip 5003, mutasi 5004, match 5005.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "classifier_url", "value": "http://localhost:8000" },
-    { "key": "sk_url", "value": "http://localhost:8100" },
-    { "key": "slip_url", "value": "http://localhost:8200" },
-    { "key": "mutasi_url", "value": "http://localhost:8300" },
-    { "key": "match_url", "value": "http://localhost:8400" }
+    { "key": "classifier_url", "value": "http://localhost:5001" },
+    { "key": "sk_url", "value": "http://localhost:5002" },
+    { "key": "slip_url", "value": "http://localhost:5003" },
+    { "key": "mutasi_url", "value": "http://localhost:5004" },
+    { "key": "match_url", "value": "http://localhost:5005" }
   ],
   "item": [
     {
-      "name": "ocr_classifier (8000)",
+      "name": "ocr_classifier (5001)",
       "description": "Classify a document as ktp / kk / sk / slip / mutasi / unknown.",
       "item": [
         {
@@ -66,7 +66,7 @@
       ]
     },
     {
-      "name": "ocr_sk (8100)",
+      "name": "ocr_sk (5002)",
       "description": "Parse Surat Keterangan Kerja / Surat Pengangkatan.",
       "item": [
         {
@@ -96,7 +96,7 @@
       ]
     },
     {
-      "name": "ocr_slip (8200)",
+      "name": "ocr_slip (5003)",
       "description": "Parse salary slips. 'ocr' selects the OCR-fallback mode.",
       "item": [
         {
@@ -127,7 +127,7 @@
       ]
     },
     {
-      "name": "ocr_mutasi (8300)",
+      "name": "ocr_mutasi (5004)",
       "description": "Extract bank-statement transactions and classify credits.",
       "item": [
         {
@@ -182,7 +182,7 @@
       ]
     },
     {
-      "name": "ocr_match (8400)",
+      "name": "ocr_match (5005)",
       "description": "Pair salary slips with their Gaji bank-credit rows.",
       "item": [
         {

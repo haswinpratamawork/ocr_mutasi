@@ -15,8 +15,8 @@ classifier: it does not parse fields or route the document onward.
 | `mutasi` | Mutasi Rekening / Rekening Koran (bank statement) |
 | `unknown` | none of the above / blank / illegible |
 
-It is a sibling of `ocr_mutasi` (8300), `ocr_slip` (8200), and `ocr_match`
-(8400), and runs on **port 8000**. It shares the repo-root `.env`,
+It is a sibling of `ocr_mutasi` (5004), `ocr_slip` (5003), and `ocr_match`
+(5005), and runs on **port 5001**. It shares the repo-root `.env`,
 `requirements.txt`, and `.venv`.
 
 ## How it works
@@ -34,7 +34,7 @@ shared `.venv`, and binds the right port; run it from anywhere and extra flags
 pass through:
 
 ```bash
-./ocr_classifier/run_api.sh            # start on :8000
+./ocr_classifier/run_api.sh            # start on :5001
 ./ocr_classifier/run_api.sh --reload   # dev auto-reload
 PORT=9000 ./ocr_classifier/run_api.sh  # override via HOST=/PORT=
 ```
@@ -44,11 +44,11 @@ importable only when the repo root is the working directory; running from inside
 `ocr_classifier/` fails with `ModuleNotFoundError: No module named 'ocr_classifier'`):
 
 ```bash
-.venv/bin/uvicorn ocr_classifier.api:app --host 0.0.0.0 --port 8000 --reload
+.venv/bin/uvicorn ocr_classifier.api:app --host 0.0.0.0 --port 5001 --reload
 ```
 
-- Browser upload page: <http://localhost:8000/upload> (the bare URL redirects here)
-- Swagger UI: <http://localhost:8000/docs>
+- Browser upload page: <http://localhost:5001/upload> (the bare URL redirects here)
+- Swagger UI: <http://localhost:5001/docs>
 
 ## Docker
 
@@ -57,10 +57,10 @@ Build this service's image (from the **repo root**, so it can include the shared
 
 ```bash
 docker build -f ocr_classifier/Dockerfile -t ocr_classifier .
-docker run --rm -p 8000:8000 --env-file .env ocr_classifier
+docker run --rm -p 5001:5001 --env-file .env ocr_classifier
 ```
 
-The API is then at <http://localhost:8000/docs> (browser upload page at `/upload`).
+The API is then at <http://localhost:5001/docs> (browser upload page at `/upload`).
 To run all five services together, use `docker compose up --build` from the repo
 root — see the [root README](../README.md#running-with-docker).
 
@@ -85,13 +85,13 @@ Each `classifier_*/` folder holds one sample PDF — substitute your own file pa
 ```bash
 # Single document
 curl -s -F "file=@classifier_kk/sample_kk.pdf" \
-  "http://localhost:8000/classify" | python -m json.tool
+  "http://localhost:5001/classify" | python -m json.tool
 
 # A batch (repeat -F file= ... once per document)
 curl -s \
   -F "files=@classifier_ktp/sample_ktp.pdf" \
   -F "files=@classifier_slip/sample_slip.pdf" \
-  "http://localhost:8000/classify-batch?include_text=false" | python -m json.tool
+  "http://localhost:5001/classify-batch?include_text=false" | python -m json.tool
 ```
 
 Example single result:

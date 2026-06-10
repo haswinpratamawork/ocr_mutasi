@@ -12,8 +12,8 @@
 - **Sinarmas "Tabungan"** — 6 bilingual columns (Date/Tanggal, Description/Keterangan, Detail, Debit/Debet, Credit/Kredit, Balance/Saldo). Layout is inverted vs the other four: period-summary rows (CLOSING BALANCE, MOVEMENT TOTALS) sit ABOVE the transaction body, column headers sit BELOW it, and rows are in reverse-chronological order with the anchor row (date + amount + balance) at the BOTTOM of each block. The parser walks rows top-to-bottom and reverses the result so the response stays forward-chronological. English number format.
 
 **Two ways to test it:**
-1. **Browser** — open <http://localhost:8300/upload>, pick one or many PDFs (multi-select via Cmd/Ctrl-click), get an accordion of classified credits.
-2. **HTTP** — `POST /api/v1/mutations/extract` (single) or `/extract-batch` (multiple) with `multipart/form-data`. Schema explorer at <http://localhost:8300/docs>.
+1. **Browser** — open <http://localhost:5004/upload>, pick one or many PDFs (multi-select via Cmd/Ctrl-click), get an accordion of classified credits.
+2. **HTTP** — `POST /api/v1/mutations/extract` (single) or `/extract-batch` (multiple) with `multipart/form-data`. Schema explorer at <http://localhost:5004/docs>.
 
 **Despite the name, no image OCR happens.** Mutasi PDFs ship with a clean embedded text layer; reading it with `pypdfium2` is faster, deterministic, and far more accurate than rasterising and OCR-ing. The "OCR" in the project name is historical. See [`docs/architecture.md`](../docs/architecture.md) for the full design and the alternatives rejected.
 
@@ -107,12 +107,12 @@ Assumes macOS / Apple Silicon with Homebrew's Python 3.12 installed; adapt the P
 cp .env.example .env
 $EDITOR .env          # paste real AZURE_OPENAI_* values
 
-# 3. Start the server (run_api.sh cd's to the repo root and binds :8300)
+# 3. Start the server (run_api.sh cd's to the repo root and binds :5004)
 ./ocr_mutasi/run_api.sh --reload
 
 # 4. (in another shell) Hit the recommended batch endpoint with a folder of PDFs
 curl -X POST $(for f in mutasi_haswin/Mutasi_*.pdf; do echo -n "-F files=@$f "; done) \
-  "http://127.0.0.1:8300/api/v1/mutations/extract-batch" \
+  "http://127.0.0.1:5004/api/v1/mutations/extract-batch" \
   | jq .audit.category_totals
 ```
 
@@ -128,7 +128,7 @@ Expected output for the included 12-month BRI sample:
 }
 ```
 
-Browse the interactive OpenAPI docs at <http://127.0.0.1:8300/docs>.
+Browse the interactive OpenAPI docs at <http://127.0.0.1:5004/docs>.
 
 ---
 
@@ -210,9 +210,9 @@ Expected: `OK — BCA 134 tx (DB=131, CR=3)`.
 ### 4.1 Development (auto-reload)
 
 ```bash
-./ocr_mutasi/run_api.sh --reload     # shortcut — cd's to repo root, binds :8300
+./ocr_mutasi/run_api.sh --reload     # shortcut — cd's to repo root, binds :5004
 # equivalent explicit command:
-.venv/bin/uvicorn ocr_mutasi.api:app --host 0.0.0.0 --port 8300 --reload
+.venv/bin/uvicorn ocr_mutasi.api:app --host 0.0.0.0 --port 5004 --reload
 ```
 
 `--reload` watches your source files and restarts on changes. Use only in dev.
@@ -221,7 +221,7 @@ Expected: `OK — BCA 134 tx (DB=131, CR=3)`.
 ### 4.2 Production-like
 
 ```bash
-.venv/bin/uvicorn ocr_mutasi.api:app --host 0.0.0.0 --port 8300 --workers 4
+.venv/bin/uvicorn ocr_mutasi.api:app --host 0.0.0.0 --port 5004 --workers 4
 ```
 
 `--workers 4` runs four uvicorn worker processes behind one socket — useful when the LLM call is the bottleneck (which it is) and you want to handle multiple uploads concurrently.
@@ -236,10 +236,10 @@ Build this service's image (from the **repo root**, so it can include the shared
 
 ```bash
 docker build -f ocr_mutasi/Dockerfile -t ocr_mutasi .
-docker run --rm -p 8300:8300 --env-file .env ocr_mutasi
+docker run --rm -p 5004:5004 --env-file .env ocr_mutasi
 ```
 
-The API is then at <http://localhost:8300/docs> (browser upload page at `/upload`). To run all five services together, use `docker compose up --build` from the repo root — see the [root README](../README.md#running-with-docker).
+The API is then at <http://localhost:5004/docs> (browser upload page at `/upload`). To run all five services together, use `docker compose up --build` from the repo root — see the [root README](../README.md#running-with-docker).
 
 ---
 
@@ -257,7 +257,7 @@ Liveness probe.
 | Response | `200 OK` — `{"status": "ok", "version": "<v>"}` |
 
 ```bash
-curl http://127.0.0.1:8300/health
+curl http://127.0.0.1:5004/health
 # {"status":"ok","version":"0.1.0"}
 ```
 
@@ -276,9 +276,9 @@ Accept **multiple PDFs in one request** and run **one** cross-month LLM classifi
 
 The trick is that **`files` is repeated once per file** in the multipart body — not one field with a list value. Every transport has its own way to express this:
 
-##### a) Built-in upload page — `http://localhost:8300/upload` *(recommended for testing)*
+##### a) Built-in upload page — `http://localhost:5004/upload` *(recommended for testing)*
 
-The simplest path. Open the URL in a browser, click **Choose PDFs**, multi-select files in the OS dialog (Cmd-click on macOS, Ctrl-click on Windows/Linux, Shift-click to range-select), and click **Extract**. The bare URL `http://localhost:8300/` redirects here too.
+The simplest path. Open the URL in a browser, click **Choose PDFs**, multi-select files in the OS dialog (Cmd-click on macOS, Ctrl-click on Windows/Linux, Shift-click to range-select), and click **Extract**. The bare URL `http://localhost:5004/` redirects here too.
 
 After the response arrives, the page renders a **per-category accordion**:
 
@@ -298,7 +298,7 @@ Gaji / THR / Bonus / Insentif expand by default; Lainnya stays collapsed (usuall
 
 This page bypasses Swagger UI's array-renderer (which insists on one file slot per array item with an "Add item" button — a Swagger UI design choice that no OpenAPI schema can work around).
 
-##### b) Swagger UI (`http://localhost:8300/docs`)
+##### b) Swagger UI (`http://localhost:5004/docs`)
 
 Swagger UI renders `files: List[UploadFile]` as one file-picker row per array item, with an **Add item** button to add more rows. Each row holds one file. So for 12 monthly statements: click **Add item** 11 times to get 12 slots, then pick one PDF per slot. This is awkward — prefer `/upload` (above) or curl (below) for batch testing. Swagger UI is best for inspecting the schema and trying single-PDF endpoints.
 
@@ -310,12 +310,12 @@ curl -X POST \
   -F files=@Mutasi_Januari_2026.pdf \
   -F files=@Mutasi_Februari_2026.pdf \
   -F files=@Mutasi_Maret_2026.pdf \
-  http://localhost:8300/api/v1/mutations/extract-batch
+  http://localhost:5004/api/v1/mutations/extract-batch
 
 # Or expand a whole folder with the shell
 curl -X POST \
   $(for f in mutasi_haswin/Mutasi_*.pdf; do echo -n "-F files=@$f "; done) \
-  http://localhost:8300/api/v1/mutations/extract-batch \
+  http://localhost:5004/api/v1/mutations/extract-batch \
   -o batch.json
 ```
 
@@ -331,7 +331,7 @@ files = [
     for p in paths
 ]
 r = httpx.post(
-    "http://localhost:8300/api/v1/mutations/extract-batch",
+    "http://localhost:5004/api/v1/mutations/extract-batch",
     files=files,
     timeout=120,
 )
@@ -347,7 +347,7 @@ paths = sorted(glob.glob("mutasi_haswin/Mutasi_*.pdf"))
 files = [("files", (p.split("/")[-1], open(p, "rb"), "application/pdf"))
          for p in paths]
 r = requests.post(
-    "http://localhost:8300/api/v1/mutations/extract-batch",
+    "http://localhost:5004/api/v1/mutations/extract-batch",
     files=files, timeout=120,
 )
 print(r.json()["audit"]["category_totals"])
@@ -390,7 +390,7 @@ Extract and (optionally) classify a single PDF.
 
 ```bash
 curl -X POST -F "file=@contoh_mutasi.pdf" \
-  "http://127.0.0.1:8300/api/v1/mutations/extract?classify=true" \
+  "http://127.0.0.1:5004/api/v1/mutations/extract?classify=true" \
   | jq .
 ```
 
@@ -798,7 +798,7 @@ All settings are read from `.env` once at startup (singleton via `pydantic-setti
 | `AZURE_OPENAI_API_VERSION` | yes | `2025-01-01-preview` | Azure API version |
 | `AZURE_OPENAI_DEPLOYMENT` | yes | `gpt-4.1-mini` | Deployment name used for classification |
 | `APP_HOST` | no | `0.0.0.0` | uvicorn bind address |
-| `APP_PORT` | no | `8000` | uvicorn bind port |
+| `APP_PORT` | no | `5001` | uvicorn bind port |
 | `LLM_REQUEST_TIMEOUT_S` | no | `30` | Per-request timeout in seconds (batch endpoint doubles this internally) |
 | `MAX_PDF_BYTES` | no | `20000000` | Per-file upload cap. Exceeding → `413`. |
 

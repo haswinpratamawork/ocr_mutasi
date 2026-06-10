@@ -96,10 +96,10 @@ PORT=5051 python3 web_app.py
 ## Local FastAPI Service
 
 Easiest — use the bundled `run_api.sh` (resolves the repo root, uses the shared
-`.venv`, binds port 8200; run from anywhere, extra flags pass through):
+`.venv`, binds port 5003; run from anywhere, extra flags pass through):
 
 ```bash
-./ocr_slip/run_api.sh            # start on :8200
+./ocr_slip/run_api.sh            # start on :5003
 ./ocr_slip/run_api.sh --reload   # dev auto-reload
 ```
 
@@ -107,19 +107,19 @@ Or run uvicorn directly, from the **repo root** (it's a package, importable only
 from the root):
 
 ```bash
-.venv/bin/uvicorn ocr_slip.app:app --host 0.0.0.0 --port 8200 --reload
+.venv/bin/uvicorn ocr_slip.app:app --host 0.0.0.0 --port 5003 --reload
 ```
 
 Open the interactive API docs:
 
 ```text
-http://127.0.0.1:8200/docs
+http://127.0.0.1:5003/docs
 ```
 
 Parse one or more PDFs:
 
 ```bash
-curl -X POST "http://127.0.0.1:8200/parse?ocr=auto" \
+curl -X POST "http://127.0.0.1:5003/parse?ocr=auto" \
   -F "files=@/path/to/salary-slip.pdf"
 ```
 
@@ -150,10 +150,10 @@ Build this service's image (from the **repo root**, so it can include the shared
 
 ```bash
 docker build -f ocr_slip/Dockerfile -t ocr_slip .
-docker run --rm -p 8200:8200 --env-file .env ocr_slip
+docker run --rm -p 5003:5003 --env-file .env ocr_slip
 ```
 
-The API is then at <http://localhost:8200/docs> (browser upload page at `/upload`).
+The API is then at <http://localhost:5003/docs> (browser upload page at `/upload`).
 To run all five services together, use `docker compose up --build` from the repo
 root — see the [root README](../README.md#running-with-docker).
 

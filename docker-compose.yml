@@ -12,7 +12,7 @@ services:
     build: { context: ., dockerfile: ocr_classifier/Dockerfile }
     image: ocr_classifier
     container_name: ocr_classifier
-    ports: ["8000:8000"]
+    ports: ["5001:5001"]
     env_file: [.env]
     restart: unless-stopped
 
@@ -20,7 +20,7 @@ services:
     build: { context: ., dockerfile: ocr_sk/Dockerfile }
     image: ocr_sk
     container_name: ocr_sk
-    ports: ["8100:8100"]
+    ports: ["5002:5002"]
     env_file: [.env]
     restart: unless-stopped
 
@@ -28,7 +28,7 @@ services:
     build: { context: ., dockerfile: ocr_slip/Dockerfile }
     image: ocr_slip
     container_name: ocr_slip
-    ports: ["8200:8200"]
+    ports: ["5003:5003"]
     env_file: [.env]
     restart: unless-stopped
 
@@ -36,7 +36,7 @@ services:
     build: { context: ., dockerfile: ocr_mutasi/Dockerfile }
     image: ocr_mutasi
     container_name: ocr_mutasi
-    ports: ["8300:8300"]
+    ports: ["5004:5004"]
     env_file: [.env]
     restart: unless-stopped
 
@@ -44,12 +44,12 @@ services:
     build: { context: ., dockerfile: ocr_match/Dockerfile }
     image: ocr_match
     container_name: ocr_match
-    ports: ["8400:8400"]
+    ports: ["5005:5005"]
     env_file: [.env]
     # Reach the upstream services by their compose DNS names, not 127.0.0.1
     # (which inside this container would point at ocr_match itself).
     environment:
-      - OCR_SLIP_URL=http://ocr_slip:8200
-      - OCR_MUTASI_URL=http://ocr_mutasi:8300
+      - OCR_SLIP_URL=http://ocr_slip:5003
+      - OCR_MUTASI_URL=http://ocr_mutasi:5004
     depends_on: [ocr_slip, ocr_mutasi]
     restart: unless-stopped
