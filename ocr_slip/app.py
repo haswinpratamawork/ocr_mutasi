@@ -528,7 +528,8 @@ function renderErrors(data) {
 
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
-    return RedirectResponse(url="/upload", status_code=307)
+    # Land on the API docs; the upload UI is still at /upload.
+    return RedirectResponse(url="/docs", status_code=307)
 
 
 @app.get("/upload", response_class=HTMLResponse, include_in_schema=False)

@@ -83,7 +83,8 @@ app.openapi = _custom_openapi
 
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
-    return RedirectResponse(url="/upload", status_code=307)
+    # Land on the API docs; the upload UI is still at /upload.
+    return RedirectResponse(url="/docs", status_code=307)
 
 
 @app.get("/favicon.ico", include_in_schema=False)

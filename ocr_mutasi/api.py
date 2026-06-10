@@ -80,9 +80,9 @@ app.openapi = _custom_openapi
 
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
-    """Redirect the bare URL to the friendly upload page (which links onward
-    to Swagger UI and ReDoc for API exploration)."""
-    return RedirectResponse(url="/upload", status_code=307)
+    """Redirect the bare URL to the API docs. The browser upload page is still
+    served at /upload."""
+    return RedirectResponse(url="/docs", status_code=307)
 
 
 @app.get("/favicon.ico", include_in_schema=False)

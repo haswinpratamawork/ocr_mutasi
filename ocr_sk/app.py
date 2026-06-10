@@ -85,7 +85,8 @@ def health() -> dict:
 
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
-    return RedirectResponse(url="/upload")
+    # Land on the API docs; the upload UI is still at /upload (and /web).
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/upload", include_in_schema=False)

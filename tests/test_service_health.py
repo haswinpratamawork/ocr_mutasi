@@ -38,6 +38,13 @@ class HealthTests(unittest.TestCase):
                 self.assertEqual(r.status_code, 200, f"{name} /health -> {r.status_code}")
                 self.assertEqual(r.json().get("status"), "ok")
 
+    def test_root_redirects_to_api_docs(self):
+        for name, app in self.APPS.items():
+            with self.subTest(service=name):
+                r = TestClient(app).get("/", follow_redirects=False)
+                self.assertIn(r.status_code, (302, 307))
+                self.assertEqual(r.headers.get("location"), "/docs", f"{name} root -> {r.headers.get('location')}")
+
 
 if __name__ == "__main__":
     unittest.main()
