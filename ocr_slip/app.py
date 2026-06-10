@@ -91,7 +91,7 @@ async def save_uploads(files: list[UploadFile], upload_dir: Path) -> list[str]:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "parser_folder": str(PARSER_DIR)}
+    return {"status": "ok", "parser_folder": str(BASE_DIR)}
 
 
 @app.post("/parse")
