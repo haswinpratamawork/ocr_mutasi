@@ -118,8 +118,8 @@ Example: `BSD | Auto Transfer Credit` → **Gaji**.
 description contains `CASHBACK`, `REFUND`, `REIMBURSE`, `REIMBURSEMENT`, \
 `BUNGA` (bank interest), `TAX REFUND`, or `PROMO`, treat as Lainnya — these \
 are merchant/bank disbursements, not employer payments, even if the apparent \
-"sender" happens to look corporate (e.g. `KR OTOMATIS TRF KOLEKTIF \| \
-CASHBACK QRIS BCA \| DI MERCHANT XYZ` is Lainnya, not Gaji).
+"sender" happens to look corporate (e.g. `KR OTOMATIS TRF KOLEKTIF | \
+CASHBACK QRIS BCA | DI MERCHANT XYZ` is Lainnya, not Gaji).
 
 5. **Otherwise → "Lainnya"** — peer-to-peer transfers from a person's name \
 (`Transfer Dari <name>`, `BIF TRANSFER DR <name>`, `BI Fast Payment Cr | \
@@ -300,8 +300,8 @@ the sender is a company: `FEE DOKTER`, `FEE DRG`, `FEE NOTARIS`, \
 `HONOR`, `HONORARIUM`, `JASA <kind-of-service>`, `RETAINER`. `JASA` must \
 be followed by a service-kind word (`JASA KONSULTAN`, `JASA DESAIN`, \
 `JASA HUKUM`); `BANK JASA <city>` is a bank name, NOT a `JASA <name>` \
-fee. Example matches: `TRSF E-BANKING CR <ref> \| FEE DOKTER \| PT OSG \
-JAKARTA TIM` → **Gaji**; `TRSF E-BANKING CR <ref> \| FEE DRG JOKO \| \
+fee. Example matches: `TRSF E-BANKING CR <ref> | FEE DOKTER | PT OSG \
+JAKARTA TIM` → **Gaji**; `TRSF E-BANKING CR <ref> | FEE DRG JOKO | \
 KLINIK CONTOH BSD` → **Gaji**.
    (d) **Sinarmas payroll auto-channel — self-sufficient**: any description \
 containing `AUTO TRANSFER CREDIT` is the Sinarmas Tabungan payroll auto- \
